@@ -3,7 +3,8 @@ import { icon } from '../core/icons.js';
 import { errorText, t } from '../core/i18n.js';
 import { api, auth } from '../core/api.js';
 import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from '../core/pwa.js';
-import { langToggle, toast, withBusy } from '../core/ui.js';
+import { confirmDialog, copyText, langToggle, openModal, toast, withBusy } from '../core/ui.js';
+import { qrSvg } from '../core/qr.js';
 import { pageHead, store } from './shared.js';
 import { env } from '../core/env.js';
 
@@ -49,6 +50,84 @@ export function settingsPage({ onLogout, refreshShell }) {
           h('label', { class: 'field' }, h('span', { class: 'label' }, t('public_link')), linkInput, h('span', { class: 'hint' }, t('public_link_hint'))),
         error,
         h('div', null, button),
+      ),
+    );
+  }
+
+  /** Әкімші сілтемесі: аккаунтсыз, құпиясөзсіз кіру (қызметкерлердің құрылғылары үшін). */
+  function adminLinkCard() {
+    const localhost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+    const base = store.info.publicUrl || (localhost && store.lanUrls[0]) || location.origin;
+    const linkFor = (key) => `${base}/admin#key=${key}`;
+    let key = null;
+    const input = h('input', { class: 'input', readonly: true, value: '…', 'aria-label': t('admin_link'), onfocus: (e) => e.target.select() });
+    const setKey = (value) => {
+      key = value;
+      input.value = linkFor(value);
+    };
+    api('/admin/settings')
+      .then((s) => setKey(s.adminKey))
+      .catch(() => {});
+
+    const showQr = () =>
+      key &&
+      openModal({
+        title: t('admin_link_qr'),
+        body: h(
+          'div',
+          { class: 'issued' },
+          h('div', { class: 'qr-box' }, qrSvg(linkFor(key), { label: t('admin_link') })),
+          h('p', { class: 'muted small' }, t('admin_link_qr_hint')),
+        ),
+      });
+
+    const rotate = async (button) => {
+      const ok = await confirmDialog({
+        title: t('admin_link_new'),
+        message: t('admin_link_new_confirm'),
+        confirmText: t('admin_link_new'),
+        danger: true,
+      });
+      if (!ok) return;
+      await withBusy(button, async () => {
+        try {
+          const result = await api('/admin/admin-key/rotate', { method: 'POST' });
+          auth.token = result.token; // осы құрылғы кірген күйде қалады
+          setKey(result.adminKey);
+          toast(t('admin_link_new_done'));
+        } catch (err) {
+          toast(errorText(err), 'error');
+        }
+      });
+    };
+
+    return h(
+      'section',
+      { class: 'card' },
+      h('div', { class: 'card-head' }, icon('key'), h('h2', null, t('admin_link'))),
+      h(
+        'div',
+        { class: 'card-body form-grid' },
+        h('p', { class: 'muted small' }, t('admin_link_lead')),
+        input,
+        h(
+          'div',
+          { class: 'row wrap' },
+          h(
+            'button',
+            {
+              class: 'btn btn-soft',
+              type: 'button',
+              onclick: async () => {
+                if (key && (await copyText(linkFor(key)))) toast(t('link_copied'));
+              },
+            },
+            icon('copy'),
+            t('copy'),
+          ),
+          h('button', { class: 'btn btn-soft', type: 'button', onclick: showQr }, icon('qr'), t('admin_link_qr')),
+          h('button', { class: 'btn btn-ghost', type: 'button', onclick: (e) => rotate(e.currentTarget) }, icon('refresh'), t('admin_link_new')),
+        ),
       ),
     );
   }
@@ -171,7 +250,7 @@ export function settingsPage({ onLogout, refreshShell }) {
       { class: 'report-grid' },
       h('div', { class: 'stack' }, businessCard(), screensCard()),
       // Claude сілтемесінде кіру Claude аккаунты арқылы — құпиясөз керек емес
-      h('div', { class: 'stack' }, !env.artifact && passwordCard(), accountCard()),
+      h('div', { class: 'stack' }, !env.artifact && adminLinkCard(), !env.artifact && passwordCard(), accountCard()),
     ),
   );
 

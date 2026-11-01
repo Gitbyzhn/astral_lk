@@ -18,6 +18,8 @@ const server = app.listen(config.port, config.host, () => {
   const urls = [`http://localhost:${config.port}`, ...lanAddresses().map((ip) => `http://${ip}:${config.port}`)];
   console.log('\n  Astral — кезек жүйесі іске қосылды');
   for (const url of urls) console.log(`  • Клиент:  ${url}\n    Әкімші:  ${url}/admin`);
+  const base = config.publicUrl || urls.at(-1);
+  console.log(`\n  🔑 Әкімші сілтемесі (құпиясөзсіз кіру, тек қызметкерлерге):\n     ${base}/admin#key=${services.auth.adminKey()}`);
   if (services.auth.isDefault()) {
     console.log('\n  ⚠ Әдепкі құпиясөз: "admin" — кіргеннен кейін «Баптаулар» бетінде өзгертіңіз.');
   }

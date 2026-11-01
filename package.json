@@ -11,6 +11,7 @@
     "test": "node --test test/*.test.js",
     "password": "node server/cli/password.js",
     "backup": "node server/cli/backup.js",
+    "admin-link": "node server/cli/admin-link.js",
     "icons": "node scripts/build-icons.js",
     "build:artifact": "node scripts/build-artifact.js"
   },

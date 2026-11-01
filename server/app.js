@@ -99,6 +99,7 @@ export function createApp({ db, events, options = {} }) {
 
   // Кіру
   api.post('/auth/login', (req, res) => res.json(auth.login(req.body?.password, req.ip)));
+  api.post('/auth/key', (req, res) => res.json(auth.loginWithKey(req.body?.key, req.ip)));
 
   // Әкімші (диспетчер) бөлігі — токен міндетті
   const admin = express.Router();
@@ -160,7 +161,10 @@ export function createApp({ db, events, options = {} }) {
     res.json(reports.build(period, date));
   });
 
-  admin.get('/settings', (_req, res) => res.json({ ...settings.publicInfo(), passwordIsDefault: auth.isDefault() }));
+  admin.get('/settings', (_req, res) =>
+    res.json({ ...settings.publicInfo(), passwordIsDefault: auth.isDefault(), adminKey: auth.adminKey() }),
+  );
+  admin.post('/admin-key/rotate', (_req, res) => res.json(auth.rotateAdminKey()));
   admin.patch('/settings', (req, res) => {
     const info = settings.update(req.body);
     events.emit('settings');

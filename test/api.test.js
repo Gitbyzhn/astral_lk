@@ -372,3 +372,34 @@ describe('беттер және PWA', () => {
     assert.equal(res.headers.get('x-powered-by'), null);
   });
 });
+
+describe('әкімші сілтемесі (аккаунтсыз кіру)', () => {
+  test('кілт арқылы кіру, жаңа сілтеме жасағанда ескісі өшеді', async () => {
+    const settingsRes = await call('/api/admin/settings');
+    const key = settingsRes.data.adminKey;
+    assert.match(key, /^[A-Za-z0-9]{24}$/);
+
+    const wrong = await call('/api/auth/key', { method: 'POST', body: { key: 'x'.repeat(24) }, auth: false });
+    assert.equal(wrong.status, 401);
+    assert.equal(wrong.data.error, 'invalid_admin_link');
+
+    const ok = await call('/api/auth/key', { method: 'POST', body: { key }, auth: false });
+    assert.equal(ok.status, 200);
+    const viaLink = ok.data.token;
+    token = viaLink;
+    assert.equal((await call('/api/admin/types')).status, 200);
+
+    const rotated = await call('/api/admin/admin-key/rotate', { method: 'POST' });
+    assert.equal(rotated.status, 200);
+    assert.notEqual(rotated.data.adminKey, key);
+
+    // ескі кілт және ескі сессиялар жарамсыз
+    assert.equal((await call('/api/auth/key', { method: 'POST', body: { key }, auth: false })).status, 401);
+    assert.equal((await call('/api/admin/types')).status, 401);
+    // жаңасы жұмыс істейді, ауыстырған құрылғы кірген күйде қалады
+    token = rotated.data.token;
+    assert.equal((await call('/api/admin/types')).status, 200);
+    const fresh = await call('/api/auth/key', { method: 'POST', body: { key: rotated.data.adminKey }, auth: false });
+    assert.equal(fresh.status, 200);
+  });
+});

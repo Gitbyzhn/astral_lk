@@ -6,7 +6,7 @@ import { brand, langToggle, withBusy } from '../core/ui.js';
 import { store } from './shared.js';
 
 /** Әкімші кіру беті. */
-export function loginView({ onSuccess }) {
+export function loginView({ onSuccess, error: initialError = null }) {
   const input = h('input', {
     class: 'input',
     type: 'password',
@@ -17,7 +17,7 @@ export function loginView({ onSuccess }) {
     placeholder: '••••••',
     'aria-label': t('password'),
   });
-  const error = h('p', { class: 'error-text', role: 'alert', hidden: true });
+  const error = h('p', { class: 'error-text', role: 'alert', hidden: !initialError }, initialError ? errorText(initialError) : '');
   const button = h('button', { class: 'btn btn-primary btn-lg btn-block', type: 'submit' }, t('login_btn'), icon('arrowRight'));
 
   const form = h(

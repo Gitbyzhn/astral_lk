@@ -156,14 +156,33 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
     );
   }
 
-  function showLogin() {
+  function showLogin(error = null) {
     stopLive?.();
     stopLive = null;
     current?.page?.destroy?.();
     current = null;
     shell = null;
     document.title = `${t('login_title')} · ${store.info.businessName}`;
-    mount(root, loginView({ onSuccess: startApp }));
+    mount(root, loginView({ onSuccess: startApp, error }));
+  }
+
+  /** Әкімші сілтемесі (/admin#key=…): кілтті сессияға айырбастап, мекенжайдан өшіреміз. */
+  async function loginFromLink() {
+    const key = new URLSearchParams(location.hash.slice(1)).get('key');
+    if (!key) return null;
+    try {
+      history.replaceState(null, '', location.pathname + location.search);
+    } catch {
+      /* мекенжайды өзгерту мүмкін болмаса да жалғастырамыз */
+    }
+    try {
+      const result = await api('/auth/key', { method: 'POST', body: { key } });
+      auth.token = result.token;
+      store.passwordIsDefault = result.passwordIsDefault;
+      return null;
+    } catch (err) {
+      return err;
+    }
   }
 
   async function logout() {
@@ -190,6 +209,8 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
       mount(root, spinner());
       registerServiceWorker();
       await loadInfo();
+      const linkError = withAuth ? await loginFromLink() : null;
+      if (linkError) return showLogin(linkError);
       if (withAuth && !auth.token) return showLogin();
       try {
         const session = await api('/admin/session');

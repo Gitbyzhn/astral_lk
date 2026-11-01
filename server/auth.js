@@ -22,6 +22,25 @@ export function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(actual, expected);
 }
 
+/** Әкімші сілтемесінің кілті: 24 таңба (~143 бит) — болжап табу мүмкін емес. */
+const KEY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+export function generateAdminKey(length = 24) {
+  const limit = 256 - (256 % KEY_ALPHABET.length);
+  let out = '';
+  while (out.length < length) {
+    for (const byte of crypto.randomBytes(length * 2)) {
+      if (byte < limit && out.length < length) out += KEY_ALPHABET[byte % KEY_ALPHABET.length];
+    }
+  }
+  return out;
+}
+
+const sameSecret = (a, b) => {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
 /** Құпиясөзді қайта-қайта болжауға тосқауыл: бір IP-ден 15 минутта 10 қате әрекет. */
 function createLimiter({ max = 10, windowMs = 15 * 60_000 } = {}) {
   const hits = new Map();
@@ -59,6 +78,9 @@ export function createAuth({ settings, initialPassword, sessionDays }) {
     settings.set('password_version', '1');
     settings.set('password_is_default', initialPassword === 'admin' ? '1' : '0');
   }
+
+  // Әкімші сілтемесі (/admin#key=…): аккаунтсыз, құпиясөзсіз кіру үшін
+  if (!settings.get('admin_key')) settings.set('admin_key', generateAdminKey());
 
   const limiter = createLimiter();
   const secret = () => settings.get('auth_secret');
@@ -99,6 +121,26 @@ export function createAuth({ settings, initialPassword, sessionDays }) {
       }
       limiter.reset(ip);
       return { ...issueToken(), passwordIsDefault: isDefault() };
+    },
+
+    /** Әкімші сілтемесі арқылы кіру. */
+    loginWithKey(key, ip) {
+      limiter.check(ip);
+      if (typeof key !== 'string' || !key || !sameSecret(key, settings.get('admin_key'))) {
+        limiter.fail(ip);
+        throw new HttpError(401, 'invalid_admin_link');
+      }
+      limiter.reset(ip);
+      return { ...issueToken(), passwordIsDefault: isDefault() };
+    },
+
+    adminKey: () => settings.get('admin_key'),
+
+    /** Жаңа сілтеме: ескісі жұмыс істемей қалады, барлық құрылғылар шығарылады (осы құрылғыдан басқа). */
+    rotateAdminKey() {
+      settings.set('admin_key', generateAdminKey());
+      settings.set('password_version', String(passwordVersion() + 1));
+      return { adminKey: settings.get('admin_key'), ...issueToken() };
     },
 
     changePassword(current, next, ip) {
