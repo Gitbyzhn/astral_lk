@@ -1,0 +1,24 @@
+{
+  "name": "astral-queue",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Кезек талон жүйесі: билет түрлері, топтық кезек, QR, есептер. Телефонға қосымша (PWA) ретінде орнатылады.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/*.test.js",
+    "password": "node server/cli/password.js",
+    "backup": "node server/cli/backup.js",
+    "icons": "node scripts/build-icons.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.3.0",
+    "qrcode-generator": "^2.0.4"
+  }
+}

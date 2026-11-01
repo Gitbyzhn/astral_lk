@@ -1,0 +1,17 @@
+services:
+  astral:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Сайттың мекенжайы (QR осы мекенжаймен жасалады)
+      PUBLIC_URL: "https://kezek.example.kz"
+      # Алғашқы құпиясөз — кіргеннен кейін «Баптаулар» бетінде өзгертіңіз
+      ADMIN_PASSWORD: "admin"
+      APP_TIMEZONE: "Asia/Almaty"
+    volumes:
+      - astral-data:/data
+
+volumes:
+  astral-data:
