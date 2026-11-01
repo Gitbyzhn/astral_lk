@@ -49,6 +49,15 @@ const kk = {
   copy_link: 'Сілтеме',
   link_copied: 'Сілтеме көшірілді',
   next_client: 'Дайын — келесі клиент',
+  public_link_missing: 'QR сілтемесі әлі бапталмаған — «Баптаулар» бетінде сайттың жария сілтемесін енгізіңіз',
+  public_link: 'Клиенттерге арналған сілтеме',
+  public_link_hint: 'Claude-та: Share → жария сілтеме (Public link) → Copy link. Осы сілтеме QR ішіне жазылады',
+  publish_pending: 'Клиенттер беті жаңартылады…',
+  publish_now: 'Қазір жаңарту',
+  publish_done: 'Клиенттер беті жаңартылды',
+  publish_error: 'Клиенттер бетін жаңарту мүмкін болмады',
+  readonly_title: 'Тек оқу режимі',
+  no_db: 'Деректер базасы қолжетімсіз. Claude-қа кіріп, бетті қайта ашыңыз',
   localhost_warning: 'Бұл QR «localhost» мекенжайымен жасалды — клиент телефоны оны аша алмайды. Әкімші бетін компьютердің желідегі мекенжайымен ашыңыз',
 
   queue_lead: 'Келесі топты шақырыңыз — клиенттің телефонында бірден көрінеді',
@@ -124,6 +133,9 @@ const kk = {
   all_time: 'Барлық уақыт',
 
   settings_lead: 'Мекеме атауы, құпиясөз және экрандар',
+  settings_lead_artifact: 'Мекеме атауы, клиенттерге арналған сілтеме және экрандар',
+  screens_only: 'Экрандар',
+  publish_disabled: 'Claude бұл бетті автоматты жаңартуға рұқсат бермеді — клиенттер кезекті таблодан көреді',
   business: 'Мекеме',
   business_name: 'Мекеме атауы',
   business_name_hint: 'Клиенттің талонында және таблода көрсетіледі',
@@ -194,6 +206,8 @@ const kk = {
   invalid_qty: 'Саны тым көп',
   order_not_found: 'Талон табылмады',
   ticket_type_not_found: 'Билет түрі табылмады',
+  invalid_public_url: 'Сілтеме https:// деп басталуы керек',
+  quota_exceeded: 'Деректер базасы толды',
 
   months: ['қаңтар', 'ақпан', 'наурыз', 'сәуір', 'мамыр', 'маусым', 'шілде', 'тамыз', 'қыркүйек', 'қазан', 'қараша', 'желтоқсан'],
   months_title: ['Қаңтар', 'Ақпан', 'Наурыз', 'Сәуір', 'Мамыр', 'Маусым', 'Шілде', 'Тамыз', 'Қыркүйек', 'Қазан', 'Қараша', 'Желтоқсан'],
@@ -249,6 +263,15 @@ const ru = {
   copy_link: 'Ссылка',
   link_copied: 'Ссылка скопирована',
   next_client: 'Готово — следующий клиент',
+  public_link_missing: 'Ссылка для QR ещё не настроена — укажите публичную ссылку на странице «Настройки»',
+  public_link: 'Ссылка для клиентов',
+  public_link_hint: 'В Claude: Share → публичная ссылка (Public link) → Copy link. Эта ссылка попадает в QR',
+  publish_pending: 'Страница клиентов обновляется…',
+  publish_now: 'Обновить сейчас',
+  publish_done: 'Страница клиентов обновлена',
+  publish_error: 'Не удалось обновить страницу клиентов',
+  readonly_title: 'Только просмотр',
+  no_db: 'База данных недоступна. Войдите в Claude и откройте страницу снова',
   localhost_warning: 'Этот QR создан с адресом «localhost» — телефон клиента его не откроет. Откройте панель по сетевому адресу компьютера',
 
   queue_lead: 'Вызовите следующую группу — клиент сразу увидит это на телефоне',
@@ -324,6 +347,9 @@ const ru = {
   all_time: 'Всё время',
 
   settings_lead: 'Название заведения, пароль и экраны',
+  settings_lead_artifact: 'Название заведения, ссылка для клиентов и экраны',
+  screens_only: 'Экраны',
+  publish_disabled: 'Claude не разрешил автообновление страницы — клиенты видят очередь на табло',
   business: 'Заведение',
   business_name: 'Название заведения',
   business_name_hint: 'Показывается на талоне клиента и на табло',
@@ -394,6 +420,8 @@ const ru = {
   invalid_qty: 'Слишком большое количество',
   order_not_found: 'Талон не найден',
   ticket_type_not_found: 'Вид билета не найден',
+  invalid_public_url: 'Ссылка должна начинаться с https://',
+  quota_exceeded: 'База данных заполнена',
 
   months: ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'],
   months_title: ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'],
@@ -405,8 +433,12 @@ const STORAGE_KEY = 'astral.lang';
 const listeners = new Set();
 
 function detect() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved && saved in DICTS) return saved;
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved && saved in DICTS) return saved;
+  } catch {
+    /* сақтау орны жабық (мысалы, sandbox iframe) */
+  }
   return 'kk';
 }
 
@@ -418,7 +450,11 @@ export const getLang = () => lang;
 export function setLang(next) {
   if (!(next in DICTS) || next === lang) return;
   lang = next;
-  localStorage.setItem(STORAGE_KEY, next);
+  try {
+    localStorage.setItem(STORAGE_KEY, next);
+  } catch {
+    /* сақтау орны жабық */
+  }
   document.documentElement.lang = next;
   for (const fn of listeners) fn(next);
 }

@@ -5,6 +5,7 @@ import { api } from '../core/api.js';
 import { money } from '../core/format.js';
 import { confirmDialog, emptyState, openModal, spinner, toast, withBusy } from '../core/ui.js';
 import { pageHead } from './shared.js';
+import { env } from '../core/env.js';
 
 const PALETTE = 8;
 
@@ -215,8 +216,8 @@ export function typesPage() {
 
   load().then(() => {
     // Кассадан «Билет түрін қосу» арқылы келсе — бірден форманы ашу
-    if (new URLSearchParams(location.search).has('new')) {
-      history.replaceState(null, '', '/admin/types');
+    if (env.artifact ? location.hash === '#types-new' : new URLSearchParams(location.search).has('new')) {
+      history.replaceState(null, '', env.artifact ? '#types' : '/admin/types');
       openEditor();
     }
   });

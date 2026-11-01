@@ -5,6 +5,7 @@ import { api } from '../core/api.js';
 import { dateTime, money, num } from '../core/format.js';
 import { chime, unlockAudio, vibrate } from '../core/media.js';
 import { copyText, emptyState, spinner, statusChip, toast } from '../core/ui.js';
+import { env } from '../core/env.js';
 import { clientHeader } from './common.js';
 import { rememberTicket } from './saved.js';
 
@@ -19,7 +20,12 @@ export function ticketPage({ params, info }) {
   let data = null;
   let failed = null;
   let online = true;
-  let notifyOn = localStorage.getItem(NOTIFY_KEY) === '1';
+  let notifyOn = false;
+  try {
+    notifyOn = localStorage.getItem(NOTIFY_KEY) === '1';
+  } catch {
+    /* сақтау орны жабық */
+  }
   let maxAhead = 0;
   const baseTitle = document.title;
 
@@ -87,7 +93,11 @@ export function ticketPage({ params, info }) {
       }
     }
     notifyOn = true;
-    localStorage.setItem(NOTIFY_KEY, '1');
+    try {
+      localStorage.setItem(NOTIFY_KEY, '1');
+    } catch {
+      /* сақтау орны жабық */
+    }
     chime();
     vibrate([120]);
     toast(t('notify_on'));
@@ -97,7 +107,8 @@ export function ticketPage({ params, info }) {
   async function share() {
     const url = location.href;
     const text = t('share_text', { n: data.order.number });
-    if (navigator.share) {
+    // Claude сілтемесінде Web Share жұмыс істемейді — сілтемені көшіреміз
+    if (navigator.share && !env.artifact) {
       try {
         await navigator.share({ title: info.businessName, text, url });
       } catch {
@@ -128,7 +139,7 @@ export function ticketPage({ params, info }) {
           { class: 'ticket-stat' },
           h('div', { class: 'v' }, num(queue.ahead)),
           h('div', { class: 'l' }, t('ahead_of_you')),
-          queue.ahead > 0 && h('div', { class: 's' }, t('people_count', { n: queue.aheadPeople })),
+          queue.ahead > 0 && queue.aheadPeople > 0 && h('div', { class: 's' }, t('people_count', { n: queue.aheadPeople })),
         ),
         h('div', { class: 'ticket-stat' }, h('div', { class: 'v' }, serving), h('div', { class: 'l' }, t('now_called_short'))),
       ),
@@ -197,13 +208,15 @@ export function ticketPage({ params, info }) {
 
     // Кезек келгенде «Хабарлау» түймесі қажет емес — тек «Бөлісу» қалады.
     const waiting = order.status === 'waiting';
+    // Хабарлама мен дыбыс Claude сілтемесінің ішінде жұмыс істемейді
+    const canNotify = waiting && !env.artifact;
     const actions = closed
       ? null
       : h(
           'div',
-          { class: 'client-actions', style: waiting ? {} : { gridTemplateColumns: '1fr' } },
+          { class: 'client-actions', style: canNotify ? {} : { gridTemplateColumns: '1fr' } },
           h('button', { class: 'btn btn-soft', onclick: share }, icon('share'), t('share')),
-          waiting &&
+          canNotify &&
             (notifyOn
               ? h('button', { class: 'btn btn-ghost', 'aria-pressed': 'true', onclick: () => (unlockAudio(), chime()) }, icon('bell'), t('notify_on'))
               : h('button', { class: 'btn btn-primary', onclick: enableNotify }, icon('bell'), t('notify_me'))),
@@ -214,7 +227,7 @@ export function ticketPage({ params, info }) {
       header(),
       ticket,
       actions,
-      waiting && !notifyOn && h('p', { class: 'hint', style: { textAlign: 'center', marginTop: '-6px' } }, t('notify_hint')),
+      canNotify && !notifyOn && h('p', { class: 'hint', style: { textAlign: 'center', marginTop: '-6px' } }, t('notify_hint')),
       items,
       h(
         'footer',

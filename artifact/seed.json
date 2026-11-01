@@ -1,0 +1,10 @@
+{
+  "meta/catalog": {
+    "types": {
+      "eres": { "name": "Ересек", "price": 2000, "description": "14 жастан бастап", "color": 0, "active": true, "sort": 0, "deleted": false },
+      "bala": { "name": "Балалар", "price": 1000, "description": "3–13 жас", "color": 1, "active": true, "sort": 1, "deleted": false },
+      "vipz": { "name": "VIP", "price": 5000, "description": "Жеке қызмет көрсету", "color": 2, "active": true, "sort": 2, "deleted": false }
+    }
+  },
+  "meta/settings": { "businessName": "Astral", "timeZone": "Asia/Almaty" }
+}

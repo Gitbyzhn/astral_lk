@@ -6,6 +6,7 @@ import { dateTime, money } from '../core/format.js';
 import { qrSvg } from '../core/qr.js';
 import { printTicket } from '../core/media.js';
 import { copyText, openModal, statusChip, toast, withBusy, confirmDialog } from '../core/ui.js';
+import { env } from '../core/env.js';
 
 /** Әкімші қосымшасының ортақ күйі. */
 export const store = {
@@ -18,13 +19,24 @@ export const store = {
 };
 
 /** QR ішіндегі сілтеме: PUBLIC_URL берілсе — сол, әйтпесе браузердегі мекенжай. */
-export const orderUrl = (order) => `${store.info.publicUrl || location.origin}/t/${order.code}`;
+export const orderUrl = (order) =>
+  env.artifact
+    ? `${store.info.publicUrl || ''}#t-${order.code}` // Claude сілтемесінде тек #атау беріледі
+    : `${store.info.publicUrl || location.origin}/t/${order.code}`;
 
 const isLocalHost = () => ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 
 /** Әкімші бетін localhost арқылы ашса, QR клиент телефонында ашылмайды — ескертеміз. */
 function localhostNotice() {
-  if (store.info.publicUrl || !isLocalHost()) return null;
+  if (env.artifact && !store.info.publicUrl) {
+    return h(
+      'a',
+      { class: 'notice', href: '/admin/settings', 'data-link': true, style: { width: '100%', textAlign: 'left', textDecoration: 'none' } },
+      icon('alert'),
+      h('span', null, t('public_link_missing')),
+    );
+  }
+  if (env.artifact || store.info.publicUrl || !isLocalHost()) return null;
   const lan = store.lanUrls[0];
   return h(
     'div',
@@ -137,12 +149,14 @@ export function showOrderModal(order, { mode = 'details', onChanged } = {}) {
     h(
       'div',
       { class: 'row', style: { width: '100%' } },
-      h(
-        'button',
-        { class: 'btn btn-soft', style: { flex: '1' }, onclick: () => printTicket({ businessName: store.info.businessName, order, url }) },
-        icon('printer'),
-        t('print'),
-      ),
+      // Claude сілтемесінде басып шығару (window.print) рұқсат етілмейді
+      !env.artifact &&
+        h(
+          'button',
+          { class: 'btn btn-soft', style: { flex: '1' }, onclick: () => printTicket({ businessName: store.info.businessName, order, url }) },
+          icon('printer'),
+          t('print'),
+        ),
       h(
         'button',
         {

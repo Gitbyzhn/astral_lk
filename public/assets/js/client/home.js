@@ -5,6 +5,8 @@ import { api } from '../core/api.js';
 import { dateTime, todayKey } from '../core/format.js';
 import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from '../core/pwa.js';
 import { statusChip } from '../core/ui.js';
+import { env } from '../core/env.js';
+import { LOGO_URL } from '../core/logo.js';
 import { clientHeader } from './common.js';
 import { forgetTicket, savedTickets } from './saved.js';
 
@@ -54,12 +56,12 @@ export function homePage({ info }) {
   }
 
   function installCard() {
-    if (isStandalone()) return null;
+    if (env.artifact || isStandalone()) return null;
     if (canPromptInstall()) {
       return h(
         'section',
         { class: 'card install-card' },
-        h('img', { class: 'brand-logo', src: '/icons/logo.svg', alt: '' }),
+        h('img', { class: 'brand-logo', src: LOGO_URL, alt: '' }),
         h('div', { class: 'qbody' }, h('div', { style: { fontWeight: '700' } }, t('install_app')), h('div', { class: 'qmeta' }, t('install_hint'))),
         h('button', { class: 'btn btn-soft btn-sm', onclick: () => promptInstall() }, icon('download', 'icon icon-sm'), t('install')),
       );
@@ -68,7 +70,7 @@ export function homePage({ info }) {
       return h(
         'section',
         { class: 'card install-card' },
-        h('img', { class: 'brand-logo', src: '/icons/logo.svg', alt: '' }),
+        h('img', { class: 'brand-logo', src: LOGO_URL, alt: '' }),
         h('div', { class: 'qbody' }, h('div', { style: { fontWeight: '700' } }, t('install_app')), h('div', { class: 'qmeta' }, t('ios_install_hint'))),
       );
     }
