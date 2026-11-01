@@ -1,0 +1,21 @@
+# Render Blueprint — бағдарламаны интернетке бір рет басып шығару.
+# Render → New → Blueprint → осы репозиторийді таңдаңыз (немесе README-дегі «Deploy to Render» түймесі).
+# Деректер (билеттер, есептер) 1 ГБ тұрақты дискте сақталады, сондықтан ақылы «starter» жоспары керек:
+# тегін жоспарда диск жоқ — әр жаңартуда барлық дерек өшіп қалады.
+services:
+  - type: web
+    name: astral-kezek
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /api/health
+    envVars:
+      # Орнату кезінде Render әкімші құпиясөзін сұрайды (кейін «Баптаулар» бетінде өзгертуге болады)
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: APP_TIMEZONE
+        value: Asia/Almaty
+    disk:
+      name: astral-data
+      mountPath: /data
+      sizeGB: 1

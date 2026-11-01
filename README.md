@@ -6,6 +6,9 @@
 
 Телефонға **қосымша ретінде орнатылады** (PWA): браузерден ашып, «Басты экранға қосу».
 
+**Интернетке шығару (кез келген жерден, кез келген браузерден ашу)** — [төмендегі нұсқаулық](#интернетке-шығару),
+ең оңай жолы бір түйме: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Gitbyzhn/astral_lk)
+
 | Касса | Талон + QR | Клиент телефоны | Кезегі келгенде |
 |---|---|---|---|
 | ![Касса](docs/screens/cashier.jpg) | ![QR](docs/screens/issued.jpg) | ![Клиент](docs/screens/client-waiting.jpg) | ![Кезегі келді](docs/screens/client-turn.jpg) |
@@ -66,7 +69,7 @@ npm start
   компьютердің IP мекенжайын қолданыңыз (бағдарлама өзі ескертеді).
 
 > Телефонға **қосымша ретінде орнату** және хабарламалар үшін сайт **HTTPS** арқылы ашылуы керек
-> (браузер талабы). Төмендегі «Серверге орнату» бөлімін қараңыз.
+> (браузер талабы). Төмендегі [«Интернетке шығару»](#интернетке-шығару) бөлімін қараңыз.
 
 ---
 
@@ -81,15 +84,45 @@ npm start
 
 ---
 
-## Серверге орнату (интернетте, HTTPS-пен)
+## Интернетке шығару
 
-### 1-нұсқа: VPS + Docker (ұсынылады)
+Бағдарламаның сервер бөлігі бар (деректер базасы, нақты уақыттағы кезек), сондықтан жүктелген
+файлдарды жай ғана ашу жеткіліксіз — ол **тәулік бойы қосулы тұратын интернеттегі серверде** жұмыс
+істеуі керек. Сонда сайт `https://...` мекенжайымен кез келген телефоннан, кез келген жерден ашылады.
+
+### 1-нұсқа: Render — ең оңайы (ұсынылады)
+
+Ештеңе орнатудың, файл көшірудің қажеті жоқ: Render кодты осы GitHub репозиторийінен өзі алады,
+HTTPS мекенжайын өзі береді. Барлық баптау дайын тұр ([`render.yaml`](render.yaml)).
+
+1. [render.com](https://render.com) сайтында **Sign up → GitHub** арқылы тіркеліңіз.
+2. Мына түймені басыңыз:
+   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Gitbyzhn/astral_lk)
+   (немесе Render Dashboard → **New → Blueprint** → `Gitbyzhn/astral_lk` репозиторийін таңдаңыз).
+3. **ADMIN_PASSWORD** өрісіне әкімші құпиясөзін ойлап жазыңыз.
+4. Төлем картасын қосып, **Deploy Blueprint / Apply** түймесін басыңыз. 3–5 минутта дайын болады.
+5. Сайтыңыздың мекенжайы Render-де көрсетіледі, мысалы `https://astral-kezek.onrender.com`:
+   - әкімші (касса): `https://astral-kezek.onrender.com/admin` — 3-қадамдағы құпиясөзбен кіресіз;
+   - клиенттер QR арқылы өздері кіреді; залдағы табло: `/board`.
+6. Телефонға қосымша ретінде орнату — [жоғарыдағы бөлім](#телефонға-қосымша-ретінде-орнату).
+
+**Құны:** шамамен **$7/ай** (Starter сервер) + **$0.25/ай** (1 ГБ диск). Нақты бағасын
+[render.com/pricing](https://render.com/pricing) бетінен тексеріңіз. Тегін жоспар **жарамайды**: онда тұрақты
+диск жоқ (әр жаңартуда барлық билет пен есеп өшеді) және сервер 15 минут бос тұрса «ұйықтап» қалады.
+
+**Өз доменіңіз** (мысалы `kezek.astral.kz`): Render → сервис → **Settings → Custom Domains** → доменді
+жазыңыз → домен сатып алған сайтта (ps.kz, hoster.kz, …) Render көрсеткен **CNAME** жазбасын қосыңыз.
+HTTPS сертификатын Render өзі береді.
+
+**Жаңарту:** GitHub-тағы кодқа өзгеріс түссе, Render сайтты өзі қайта жариялайды; деректер дискте сақталады.
+
+### 2-нұсқа: Өз серверіңіз (VPS) + Docker
 
 Кез келген Linux сервер (ps.kz, hoster.kz, Hetzner, т.б.) және өз доменіңіз (мысалы `kezek.example.kz`).
 
 1. Доменнің A-жазбасын сервердің IP-іне бағыттаңыз.
-2. `docker-compose.yml` ішінде `PUBLIC_URL` мәнін өз доменіңізге өзгертіңіз.
-3. Іске қосыңыз:
+2. Серверде: `git clone https://github.com/Gitbyzhn/astral_lk.git && cd astral_lk`
+3. `docker-compose.yml` ішінде `PUBLIC_URL` және `ADMIN_PASSWORD` мәндерін өзгертіп, іске қосыңыз:
 
    ```bash
    docker compose up -d --build
@@ -105,10 +138,10 @@ npm start
 
    `sudo systemctl reload caddy` — болды, сайт `https://kezek.example.kz` мекенжайында.
 
-### 2-нұсқа: Docker-сіз (Node.js + pm2 + nginx)
+### 3-нұсқа: Docker-сіз (Node.js + pm2 + nginx)
 
 ```bash
-git clone <репозиторий> astral && cd astral
+git clone https://github.com/Gitbyzhn/astral_lk.git astral && cd astral
 npm ci --omit=dev
 PUBLIC_URL=https://kezek.example.kz npx pm2 start server/index.js --name astral
 npx pm2 save
@@ -133,10 +166,24 @@ server {
 
 HTTPS: `sudo certbot --nginx -d kezek.example.kz`.
 
-### 3-нұсқа: Railway / Render / Fly.io
+### 4-нұсқа: Railway / Fly.io
 
 Репозиторийді қосыңыз (Dockerfile өзі табылады), **тұрақты диск (volume)** қосып, оны `/data`-ға
-бекітіңіз — әйтпесе әр жаңартуда деректер өшеді. Орта айнымалылары: `PUBLIC_URL`, `ADMIN_PASSWORD`.
+бекітіңіз — әйтпесе әр жаңартуда деректер өшеді. Орта айнымалысы: `ADMIN_PASSWORD`.
+Диск құқықтарын контейнер өзі реттейді (`docker-entrypoint.sh`), қосымша баптау керек емес.
+
+### Тегін тексеріп көру: өз компьютеріңізден уақытша сілтеме
+
+Сатып алмай тұрып сынап көру үшін: компьютерде `npm start` іске қосылып тұрғанда
+[Cloudflare Tunnel](https://try.cloudflare.com)
+уақытша `https://….trycloudflare.com` сілтемесін береді — ол кез келген жерден ашылады:
+
+```bash
+# Windows: winget install --id Cloudflare.cloudflared    macOS: brew install cloudflared
+cloudflared tunnel --url http://localhost:3000
+```
+
+Бұл тек сынауға арналған: компьютер өшсе сайт та өшеді, ал сілтеме әр іске қосқанда өзгереді.
 
 ---
 
@@ -161,7 +208,7 @@ npm run password -- ЖаңаҚұпиясөз   # құпиясөзді ұмыты
 npm run backup                     # сақтық көшірме → data/backups/astral-ГГГГ-АА-КК-ССММ.db
 ```
 
-Docker-де: `docker compose exec astral npm run backup`. Барлық дерек бір файлда: `data/astral.db`.
+Docker-де: `docker compose exec -u node astral npm run backup`. Барлық дерек бір файлда: `data/astral.db`.
 
 ---
 
@@ -195,6 +242,8 @@ public/
   assets/js/client/   талон беті, басты бет, табло
   sw.js               service worker
 test/api.test.js      API тесттері
+render.yaml           Render-ге бір рет басып шығару баптауы
+Dockerfile            Docker образы (+ docker-entrypoint.sh, docker-compose.yml)
 ```
 
 ### API қысқаша
@@ -223,4 +272,6 @@ test/api.test.js      API тесттері
 на телефон как приложение (нужен HTTPS).
 
 Запуск: `npm install && npm start`, админка — `/admin`, пароль по умолчанию `admin`.
-Развёртывание — раздел «Серверге орнату» выше (Docker + Caddy — самый простой путь к HTTPS).
+Чтобы открыть из любого места: кнопка **Deploy to Render** (раздел «Интернетке шығару» выше) — сайт
+появится по адресу `https://….onrender.com` (≈ $7/мес, бесплатный план не подходит: нет диска для данных).
+Альтернатива — свой VPS + Docker + Caddy.
