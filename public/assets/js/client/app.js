@@ -76,6 +76,7 @@ export function createClientApp({ root }) {
           current?.onEvent?.(type);
         },
         {
+          mode: info.realtime,
           onStatus: (value) => {
             online = value;
             current?.setOnline?.(value);

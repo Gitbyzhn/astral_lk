@@ -1,6 +1,5 @@
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import express from 'express';
 import { ROOT_DIR, config } from './config.js';
 import { HttpError } from './errors.js';
@@ -11,9 +10,7 @@ import { createOrders } from './services/orders.js';
 import { createReports } from './services/reports.js';
 import { buildManifest } from './manifest.js';
 
-const require = createRequire(import.meta.url);
 const PUBLIC_DIR = path.join(ROOT_DIR, 'public');
-const QR_LIBRARY = path.join(path.dirname(require.resolve('qrcode-generator')), 'qrcode.mjs');
 
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
@@ -181,9 +178,6 @@ export function createApp({ db, events, options = {} }) {
   const sendPage = (res, file) =>
     res.set('Cache-Control', 'no-cache').sendFile(path.join(PUBLIC_DIR, file));
 
-  app.get('/vendor/qrcode.mjs', (_req, res) =>
-    res.sendFile(QR_LIBRARY, { headers: { 'Cache-Control': 'public, max-age=86400' } }),
-  );
   const sendManifest = (kind) => (_req, res) =>
     res
       .type('application/manifest+json')
@@ -191,6 +185,8 @@ export function createApp({ db, events, options = {} }) {
       .send(JSON.stringify(buildManifest(kind, settings.publicInfo().businessName)));
   app.get('/manifest.webmanifest', sendManifest('client'));
   app.get('/admin/manifest.webmanifest', sendManifest('admin'));
+  // Cloudflare нұсқасына арналған файл — өз серверде қажет емес
+  app.get('/_headers', (_req, res) => res.status(404).end());
   app.use(
     express.static(PUBLIC_DIR, {
       index: false,

@@ -6,8 +6,9 @@
 
 Телефонға **қосымша ретінде орнатылады** (PWA): браузерден ашып, «Басты экранға қосу».
 
-**Интернетке шығару (кез келген жерден, кез келген браузерден ашу)** — [төмендегі нұсқаулық](#интернетке-шығару),
-ең оңай жолы бір түйме: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Gitbyzhn/astral_lk)
+**Интернетке тегін шығару (кез келген жерден, кез келген браузерден ашу)** — бір түйме, карта керек емес:
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Gitbyzhn/astral_lk)
+— толығырақ [төмендегі нұсқаулықта](#интернетке-шығару).
 
 | Касса | Талон + QR | Клиент телефоны | Кезегі келгенде |
 |---|---|---|---|
@@ -121,7 +122,24 @@ npm start
 файлдарды жай ғана ашу жеткіліксіз — ол **тәулік бойы қосулы тұратын интернеттегі серверде** жұмыс
 істеуі керек. Сонда сайт `https://...` мекенжайымен кез келген телефоннан, кез келген жерден ашылады.
 
-### 1-нұсқа: Render — ең оңайы (ұсынылады)
+### Тегін: Cloudflare (ұсынылады)
+
+Cloudflare-дің тегін жоспарында: төлем картасы керек емес, сайт ұйықтамайды, деректер тегін D1
+базасында сақталады, мекенжайы `https://astral-kezek.<сіздің-атыңыз>.workers.dev`.
+
+1. [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) — email арқылы тегін тіркеліңіз.
+2. Мына түймені басыңыз:
+   [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Gitbyzhn/astral_lk)
+3. GitHub аккаунтыңызды қосыңыз (Cloudflare жобаның көшірмесін сіздің GitHub-қа жасайды).
+4. **ADMIN_PASSWORD** өрісіне алғашқы құпиясөзді жазып, **Deploy** басыңыз. 2–3 минутта дайын.
+5. Сайтты ашыңыз: `…workers.dev/admin` → құпиясөзбен бір рет кіресіз →
+   **Баптаулар → «Әкімші сілтемесі»** → оны қызметкерлердің құрылғыларында ашыңыз (аккаунтсыз, құпиясөзсіз).
+
+Бұл нұсқада кезек өзгерістері SSE орнына әр 10 секунд сайын тексеріледі (тегін платформаның ерекшелігі).
+Тегін шектеулер (күніне 100 000 сұрау, D1 — 5 млн жол оқу) шағын мекемеге бірнеше есе жетеді.
+Код `worker/` бумасында, баптауы — `wrangler.jsonc`. Өз компьютеріңізде сынау: `npm run cf:dev`.
+
+### 1-нұсқа: Render — ақылы, бірақ ең қарапайым толық сервер (~$7/ай)
 
 Ештеңе орнатудың, файл көшірудің қажеті жоқ: Render кодты осы GitHub репозиторийінен өзі алады,
 HTTPS мекенжайын өзі береді. Барлық баптау дайын тұр ([`render.yaml`](render.yaml)).
@@ -254,6 +272,8 @@ npm test        # API тесттері (node:test)
 ```
 
 - **Сервер:** Node.js 22, Express 5, SQLite (`better-sqlite3`), Server-Sent Events — сыртқы сервис қажет емес.
+- **Тегін нұсқа:** Cloudflare Workers + D1 (`worker/`, `migrations/`, `wrangler.jsonc`) — API жолдары мен
+  жауаптары сервер нұсқасымен бірдей, беттер (public/) ортақ.
 - **Клиент:** таза JavaScript (ES modules), құрастыру (build) қадамы жоқ, PWA (manifest + service worker).
 - **Қауіпсіздік:** құпиясөз scrypt-пен хэштеледі, HMAC токен, кіру әрекеттерін шектеу, қатаң CSP,
   клиент тек өз талонын көреді (сілтемедегі код болжап табылмайды).
@@ -275,6 +295,8 @@ public/
   assets/js/admin/    касса, кезек, билет түрлері, есеп, баптаулар
   assets/js/client/   талон беті, басты бет, табло
   sw.js               service worker
+worker/               Cloudflare Workers нұсқасы (тегін хостинг): D1 деректер базасы
+migrations/           D1 схемасы
 test/api.test.js      API тесттері
 render.yaml           Render-ге бір рет басып шығару баптауы
 Dockerfile            Docker образы (+ docker-entrypoint.sh, docker-compose.yml)
@@ -306,6 +328,7 @@ Dockerfile            Docker образы (+ docker-entrypoint.sh, docker-compos
 на телефон как приложение (нужен HTTPS).
 
 Запуск: `npm install && npm start`, админка — `/admin`, пароль по умолчанию `admin`.
-Чтобы открыть из любого места: кнопка **Deploy to Render** (раздел «Интернетке шығару» выше) — сайт
-появится по адресу `https://….onrender.com` (≈ $7/мес, бесплатный план не подходит: нет диска для данных).
-Альтернатива — свой VPS + Docker + Caddy.
+Бесплатно в интернете: кнопка **Deploy to Cloudflare** (раздел «Интернетке шығару» выше) — без карты,
+адрес `https://astral-kezek.<ваше-имя>.workers.dev`, данные в бесплатной базе Cloudflare D1. Вход в админку:
+пароль один раз, затем «Настройки → Ссылка администратора» (без аккаунта и пароля, как токен в ссылке).
+Платные альтернативы: Render (≈ $7/мес) или свой VPS + Docker + Caddy.

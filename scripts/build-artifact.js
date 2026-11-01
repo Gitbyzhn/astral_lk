@@ -4,7 +4,6 @@
 //   core/pwa.js, core/env.js.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import { renderDocument } from '../artifact/template.js';
@@ -12,7 +11,7 @@ import { renderDocument } from '../artifact/template.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CORE = path.join(ROOT, 'public', 'assets', 'js', 'core');
 const SWAPPED = new Set(['api.js', 'live.js', 'router.js', 'pwa.js', 'env.js']);
-const QR_LIBRARY = path.join(path.dirname(createRequire(import.meta.url).resolve('qrcode-generator')), 'qrcode.mjs');
+const QR_LIBRARY = path.join(ROOT, 'public', 'vendor', 'qrcode.mjs');
 
 const artifactSwap = {
   name: 'astral-artifact-swap',

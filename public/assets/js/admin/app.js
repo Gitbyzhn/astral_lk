@@ -148,6 +148,7 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
         current?.page?.onEvent?.(type);
       },
       {
+        mode: store.info.realtime,
         onStatus: (value) => {
           online = value;
           updateChrome();

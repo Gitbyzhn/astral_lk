@@ -13,7 +13,9 @@
     "backup": "node server/cli/backup.js",
     "admin-link": "node server/cli/admin-link.js",
     "icons": "node scripts/build-icons.js",
-    "build:artifact": "node scripts/build-artifact.js"
+    "build:artifact": "node scripts/build-artifact.js",
+    "cf:dev": "wrangler d1 migrations apply DB --local && wrangler dev",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy"
   },
   "engines": {
     "node": ">=22"
@@ -24,6 +26,17 @@
     "qrcode-generator": "^2.0.4"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.156.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_PASSWORD": {
+        "description": "Әкімшінің **алғашқы құпиясөзі** — сайтқа бір рет кіру үшін. Кейін «Баптаулар» → «Әкімші сілтемесі» арқылы аккаунтсыз, құпиясөзсіз кіресіз."
+      },
+      "DB": {
+        "description": "Билеттер, кезек және есептер сақталатын тегін D1 деректер базасы."
+      }
+    }
   }
 }

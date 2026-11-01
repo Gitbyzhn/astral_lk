@@ -1,0 +1,27 @@
+// Cloudflare Workers нұсқасы (тегін): README → «Тегін: Cloudflare».
+// «Deploy to Cloudflare» түймесі D1 базасын өзі жасап, database_id-ді осы файлда ауыстырады.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "astral-kezek",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "astral-kezek",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "APP_TIMEZONE": "Asia/Almaty"
+  },
+  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
+  "observability": { "enabled": true }
+}
