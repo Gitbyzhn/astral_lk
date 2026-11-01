@@ -3,10 +3,11 @@
  * Иесі (немесе редактор) → әкімші: касса, кезек, билеттер, есеп, баптаулар (Claude деректер базасы).
  * Басқалар (QR сканерлеген клиенттер, Claude-қа кірмесе де) → талон беті және табло.
  */
-import { mount } from '../public/assets/js/core/dom.js';
-import { onLangChange } from '../public/assets/js/core/i18n.js';
+import { h, mount } from '../public/assets/js/core/dom.js';
+import { icon } from '../public/assets/js/core/icons.js';
+import { onLangChange, t } from '../public/assets/js/core/i18n.js';
 import { setTimeZone, todayKey } from '../public/assets/js/core/format.js';
-import { spinner } from '../public/assets/js/core/ui.js';
+import { emptyState, spinner } from '../public/assets/js/core/ui.js';
 import { ADMIN_NAV, createAdminApp } from '../public/assets/js/admin/app.js';
 import { CLIENT_ROUTES, createClientApp } from '../public/assets/js/client/app.js';
 import { createRouter } from './router.js';
@@ -20,6 +21,28 @@ async function boot() {
   mount(root, spinner());
   setTimeZone(embeddedSnapshot()?.tz || 'Asia/Almaty');
   await ready;
+
+  // Иесі ашты, бірақ деректер базасы қосылмады — клиент бетін емес, түсінікті хабар көрсетеміз
+  if (runtime.isAdmin && runtime.db === null) {
+    mount(
+      root,
+      h(
+        'div',
+        { class: 'client' },
+        h(
+          'div',
+          { class: 'card' },
+          emptyState({
+            iconName: 'alert',
+            title: t('error_network'),
+            text: t('no_db'),
+            action: h('button', { class: 'btn btn-soft', onclick: () => location.reload() }, icon('refresh'), t('refresh')),
+          }),
+        ),
+      ),
+    );
+    return;
+  }
 
   const isAdmin = runtime.isAdmin && runtime.db !== null;
   if (isAdmin) {

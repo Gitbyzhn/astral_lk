@@ -10,7 +10,7 @@ export const runtime = {
   isAdmin: false,
 };
 
-async function waitForClaude(ms = 3000) {
+async function waitForClaude(ms = 10_000) {
   const started = Date.now();
   while (!window.claude?.use) {
     if (Date.now() - started > ms) return null;

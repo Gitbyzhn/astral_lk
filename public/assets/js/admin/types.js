@@ -217,7 +217,11 @@ export function typesPage() {
   load().then(() => {
     // Кассадан «Билет түрін қосу» арқылы келсе — бірден форманы ашу
     if (env.artifact ? location.hash === '#types-new' : new URLSearchParams(location.search).has('new')) {
-      history.replaceState(null, '', env.artifact ? '#types' : '/admin/types');
+      try {
+        history.replaceState(null, '', env.artifact ? '#types' : '/admin/types');
+      } catch {
+        /* sandbox iframe-та history API бұғатталуы мүмкін */
+      }
       openEditor();
     }
   });

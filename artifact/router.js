@@ -61,9 +61,16 @@ export function createRouter(routes, onRoute) {
   function navigate(path, { replace = false } = {}) {
     const hash = pathToHash(path);
     if (hash === location.hash) return resolve();
-    if (replace) history.replaceState(null, '', hash);
-    else location.hash = hash;
-    if (replace) resolve();
+    if (replace) {
+      try {
+        history.replaceState(null, '', hash);
+        resolve();
+      } catch {
+        location.replace(hash); // sandbox iframe-та history API бұғатталса
+      }
+    } else {
+      location.hash = hash;
+    }
     window.scrollTo(0, 0);
   }
 
