@@ -3210,3 +3210,11 @@ input[type='month'].input {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
 }
+
+/* Кезек тізіміндегі жолдың оң жағы: «Шақыру» және 🗑 («Қате билет») */
+.row-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

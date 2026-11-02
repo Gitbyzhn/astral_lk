@@ -273,7 +273,7 @@ export function typesTable(rows, totals, { share: withShare = true } = {}) {
 
 /**
  * Талон терезесі: нөмір, QR, билеттер. «issued» — жаңа берілген талон, «details» — кезектегі талон
- * (шақыру, аяқтау, «Қате билет», кезекке қайтару — әкімші мен кассирге).
+ * (шақыру, қайта шақыру, кезекке қайтару — әкімші мен кассирге).
  * @param {object} order
  * @param {{ mode?: 'issued' | 'details', onChanged?: () => void, actions?: boolean }} [options]
  */
@@ -314,17 +314,7 @@ export function showOrderModal(order, { mode = 'details', onChanged, actions = t
         h('button', { class: 'btn btn-ghost', onclick: (e) => setStatus(e.currentTarget, 'waiting') }, icon('undo'), t('return_to_queue')),
       );
     }
-    // «Қате билет»: аяқталғаны да есептен шығарылуы мүмкін
-    if (order.status !== 'cancelled') {
-      actionButtons.push(
-        h(
-          'button',
-          { class: 'btn btn-danger', onclick: (e) => setStatus(e.currentTarget, 'cancelled', t('cancel_order_confirm', { n: order.number })) },
-          icon('x'),
-          t('cancel_order'),
-        ),
-      );
-    }
+    // «Қате билет» мұнда жоқ — тізімдегі 🗑 түймесімен және шақырылған топтың карточкасында
   }
 
   const body = h(

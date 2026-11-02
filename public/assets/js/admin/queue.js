@@ -149,8 +149,11 @@ export function queuePage({ setBadge }) {
           h('span', { class: 'num' }, money(order.total)),
         ),
       ),
-      isWaiting
-        ? h(
+      h(
+        'div',
+        { class: 'row-actions' },
+        isWaiting &&
+          h(
             'button',
             {
               class: 'btn btn-soft btn-sm',
@@ -160,11 +163,11 @@ export function queuePage({ setBadge }) {
               },
             },
             t('call'),
-          )
-        : order.status === 'cancelled'
+          ),
+        // Қоқыс жәшігі: «Қате билет» — талон кезектен де, есептен де алынады (растаудан кейін)
+        order.status === 'cancelled'
           ? statusChip('cancelled')
-          : // Қоқыс жәшігі: «Қате билет» — есептен алынып тасталады (растаудан кейін)
-            h(
+          : h(
               'button',
               {
                 class: 'btn btn-danger btn-icon btn-sm',
@@ -177,6 +180,7 @@ export function queuePage({ setBadge }) {
               },
               icon('trash'),
             ),
+      ),
     );
   }
 
