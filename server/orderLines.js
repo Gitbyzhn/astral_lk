@@ -117,3 +117,16 @@ export const PAYMENT_REPORT_SQL = (where) => `
   LEFT JOIN payment_methods p ON p.id = i.payment_method_id
   WHERE ${where}
   GROUP BY i.payment_method_id`;
+
+/**
+ * Өшірілетін талондар (есепті тазалау): { ids: [1, 2] } немесе бүкіл кезең { all: true, period, date }.
+ * @param {(period: string, date?: string) => { from: string | null, to: string | null }} resolveRange
+ */
+export function deleteTarget(body, resolveRange) {
+  if (body?.all === true) return { range: resolveRange(String(body.period ?? 'day'), body.date ? String(body.date) : undefined) };
+  const ids = body?.ids;
+  if (!Array.isArray(ids) || !ids.length || ids.length > 1000 || ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+    throw badRequest('invalid_ids');
+  }
+  return { ids: [...new Set(ids)] };
+}

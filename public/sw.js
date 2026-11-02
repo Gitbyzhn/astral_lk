@@ -1,6 +1,6 @@
 /* Astral service worker: қосымша қабығын кэштейді (желі нашар болса да ашылады).
    Стратегия — алдымен желі, болмаса кэш. API сұраулары кэштелмейді (деректер әрқашан жаңа). */
-const VERSION = 'astral-v3';
+const VERSION = 'astral-v4';
 
 const SHELL = [
   '/',
@@ -101,10 +101,81 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// «Сіздің кезегіңіз келді» хабарламасын басқанда — талон бетін ашу.
+/* ---------------- Клиент телефонына хабарлама (Web Push) ----------------
+   Сервер «бос» push жібереді (шифрлау керек емес) — қай талон шақырылғанын осы жерде сұраймыз.
+   Хабарлама телефонның өз дыбысымен және дірілімен келеді (бет жабық, экран құлыптаулы болса да). */
+const PUSH_TEXT = {
+  kk: {
+    turn: 'Сіздің кезегіңіз келді!',
+    turnBody: '№{n} · Кассаға немесе кіреберіске келіңіз',
+    next: 'Келесі — сіз!',
+    nextBody: '№{n} · Дайын болыңыз',
+    check: 'Кезек жаңарды',
+    checkBody: 'Талоныңызды ашып қараңыз',
+  },
+  ru: {
+    turn: 'Ваша очередь!',
+    turnBody: '№{n} · Подойдите к кассе или ко входу',
+    next: 'Следующий — вы!',
+    nextBody: '№{n} · Будьте готовы',
+    check: 'Очередь обновилась',
+    checkBody: 'Откройте свой талон',
+  },
+};
+
+async function showPushNotifications() {
+  let orders = [];
+  try {
+    const sub = await self.registration.pushManager.getSubscription();
+    if (sub) {
+      const res = await fetch('/api/public/push/pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: sub.endpoint }),
+        cache: 'no-store',
+      });
+      if (res.ok) orders = (await res.json()).orders ?? [];
+    }
+  } catch {
+    /* желі жоқ — жалпы хабарлама */
+  }
+  const common = {
+    icon: '/icons/icon-192.png',
+    badge: '/icons/badge-96.png',
+    vibrate: [400, 150, 400, 150, 800],
+    renotify: true,
+    silent: false,
+  };
+  if (!orders.length) {
+    const text = PUSH_TEXT.kk;
+    return self.registration.showNotification(text.check, { ...common, body: text.checkBody, tag: 'astral-queue', data: { url: '/' } });
+  }
+  await Promise.all(
+    orders.map(async (order) => {
+      const text = PUSH_TEXT[order.lang] ?? PUSH_TEXT.kk;
+      const turn = order.status === 'serving';
+      // Кезек келді — «Келесі — сіз» хабарламасы енді керек емес
+      if (turn) for (const old of await self.registration.getNotifications({ tag: `next-${order.code}` })) old.close();
+      return self.registration.showNotification(turn ? text.turn : text.next, {
+        ...common,
+        body: (turn ? text.turnBody : text.nextBody).replace('{n}', order.number),
+        tag: `${turn ? 'turn' : 'next'}-${order.code}`,
+        requireInteraction: turn,
+        timestamp: Date.now(),
+        data: { url: `/t/${order.code}` },
+      });
+    }),
+  );
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil(showPushNotifications());
+});
+
+// Хабарламаны басқанда — талон бетін ашу (ашық тұрса — соған өту).
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = event.notification.data?.url || '/';
+  const target = new URL(event.notification.data?.url || '/', self.location.origin).href;
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
       for (const client of windows) {

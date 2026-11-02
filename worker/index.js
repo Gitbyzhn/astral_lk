@@ -10,8 +10,10 @@ import { ensureReady, getSettings, setSetting, bump, versions } from './data.js'
 import { changePassword, login, loginWithKey, requireRole, rotateAdminKey, rotateCashierKey } from './auth.js';
 import { createType, listTypes, removeType, reorderTypes, updateType } from './types.js';
 import { createPayment, listPayments, removePayment, updatePayment } from './payments.js';
-import { board, callNext, createOrder, dayOrders, getOrder, publicView, queueState, setStatus } from './orders.js';
-import { buildReport } from './reports.js';
+import { board, callNext, createOrder, dayOrders, getOrder, listRange, publicView, queueState, removeOrders, setStatus } from './orders.js';
+import { buildReport, resolveRange } from './reports.js';
+import { notifyQueue, pendingPush, subscribePush } from './push.js';
+import { deleteTarget } from '../server/orderLines.js';
 
 const DEFAULT_BUSINESS = 'Astral Labyrinth';
 
@@ -21,6 +23,8 @@ function publicInfo(settings, ctx) {
     timeZone: ctx.tz,
     publicUrl: ctx.env.PUBLIC_URL || null,
     realtime: 'poll',
+    // Клиент телефонына хабарлама жазылымы үшін (VAPID ашық кілті)
+    pushKey: settings.get('vapid_public') || null,
   };
 }
 
@@ -41,6 +45,23 @@ async function kassaSummary(ctx, date) {
 
 const createOrderRoute = async (ctx, _p, request) => [201, await createOrder(ctx, (await readBody(request)).items)];
 
+/** Кезек өзгергеннен кейін клиенттерге хабарлама — жауапты күттірмей (waitUntil). */
+const notify = (ctx, calledId = null) => ctx.waitUntil(notifyQueue(ctx, { calledId }).catch((err) => console.error('push', err?.message ?? err)));
+
+const queueNextRoute = async (ctx) => {
+  const result = await callNext(ctx);
+  notify(ctx, result.called?.id ?? null);
+  return result;
+};
+
+const patchOrderRoute = async (ctx, [id], request) => {
+  const order = await setStatus(ctx, id, (await readBody(request)).status);
+  notify(ctx, order.status === 'serving' ? order.id : null);
+  return order;
+};
+
+const range = (ctx, url) => resolveRange(url.searchParams.get('period') ?? 'day', url.searchParams.get('date') ?? undefined, ctx.tz);
+
 /**
  * API маршруттары: [әдіс, үлгі, өңдеуші(ctx, params, request, url, auth), кімге]
  *   кімге: жоқ — бәріне, 'staff' — әкімші мен кассир, 'admin' — тек әкімші. auth = { settings, role }
@@ -55,6 +76,9 @@ const ROUTES = [
     /^\/api\/public\/orders\/([^/]+)$/,
     async (ctx, [code]) => ({ ...(await publicView(ctx, decodeURIComponent(code))), business: publicInfo(await getSettings(ctx.db), ctx) }),
   ],
+  // Клиенттің телефонына хабарлама: «Хабарлау» басқанда жазылу, service worker push алғанда — не болғанын сұрау
+  ['POST', /^\/api\/public\/orders\/([^/]+)\/push$/, async (ctx, [code], request) => subscribePush(ctx, decodeURIComponent(code), await readBody(request))],
+  ['POST', /^\/api\/public\/push\/pending$/, async (ctx, _p, request) => pendingPush(ctx, (await readBody(request)).endpoint)],
   ['POST', /^\/api\/auth\/login$/, async (ctx, _p, request) => login(ctx, (await readBody(request)).password)],
   ['POST', /^\/api\/auth\/key$/, async (ctx, _p, request) => loginWithKey(ctx, (await readBody(request)).key)],
 
@@ -70,6 +94,11 @@ const ROUTES = [
     'staff',
   ],
   ['POST', /^\/api\/kassa\/orders$/, createOrderRoute, 'staff'],
+  // Кезек: «Келесіні шақыру», «Аяқтау», «Қате билет» — әкімші де, кассир де
+  ['GET', /^\/api\/kassa\/queue$/, (ctx) => queueState(ctx), 'staff'],
+  ['POST', /^\/api\/kassa\/queue\/next$/, queueNextRoute, 'staff'],
+  ['GET', /^\/api\/kassa\/orders\/([^/]+)$/, (ctx, [id]) => getOrder(ctx.db, id), 'staff'],
+  ['PATCH', /^\/api\/kassa\/orders\/([^/]+)$/, patchOrderRoute, 'staff'],
   ['GET', /^\/api\/kassa\/summary$/, (ctx, _p, _r, url) => kassaSummary(ctx, url.searchParams.get('date') ?? undefined), 'staff'],
 
   // Әкімші
@@ -83,11 +112,20 @@ const ROUTES = [
   ['POST', /^\/api\/admin\/payment-methods$/, async (ctx, _p, request, _u, a) => [201, await createPayment(ctx.db, a.settings, await readBody(request))], 'admin'],
   ['PATCH', /^\/api\/admin\/payment-methods\/([^/]+)$/, async (ctx, [id], request, _u, a) => updatePayment(ctx.db, a.settings, id, await readBody(request)), 'admin'],
   ['DELETE', /^\/api\/admin\/payment-methods\/([^/]+)$/, async (ctx, [id]) => (await removePayment(ctx.db, id), [204, null]), 'admin'],
-  ['POST', /^\/api\/admin\/orders$/, createOrderRoute, 'admin'], // ескі нұсқамен үйлесімділік (жаңасы — /kassa/orders)
+  // Ескі жолдар (әкімші ғана) — жаңалары /kassa/... астында
+  ['POST', /^\/api\/admin\/orders$/, createOrderRoute, 'admin'],
   ['GET', /^\/api\/admin\/orders\/([^/]+)$/, (ctx, [id]) => getOrder(ctx.db, id), 'admin'],
-  ['PATCH', /^\/api\/admin\/orders\/([^/]+)$/, async (ctx, [id], request) => setStatus(ctx, id, (await readBody(request)).status), 'admin'],
+  ['PATCH', /^\/api\/admin\/orders\/([^/]+)$/, patchOrderRoute, 'admin'],
   ['GET', /^\/api\/admin\/queue$/, (ctx) => queueState(ctx), 'admin'],
-  ['POST', /^\/api\/admin\/queue\/next$/, (ctx) => callNext(ctx), 'admin'],
+  ['POST', /^\/api\/admin\/queue\/next$/, queueNextRoute, 'admin'],
+  // Есепті тазалау: кезеңдегі талондар тізімі және оларды біржола өшіру
+  ['GET', /^\/api\/admin\/report-orders$/, (ctx, _p, _r, url) => listRange(ctx.db, range(ctx, url)), 'admin'],
+  [
+    'POST',
+    /^\/api\/admin\/orders\/delete$/,
+    async (ctx, _p, request) => ({ deleted: await removeOrders(ctx.db, deleteTarget(await readBody(request), (p, d) => resolveRange(p, d, ctx.tz))) }),
+    'admin',
+  ],
   ['GET', /^\/api\/admin\/reports$/, (ctx, _p, _r, url) => buildReport(ctx, url.searchParams.get('period') ?? 'day', url.searchParams.get('date') ?? undefined), 'admin'],
   [
     'GET',
@@ -114,12 +152,14 @@ const ROUTES = [
   ],
 ];
 
-async function handleApi(request, env, url) {
+async function handleApi(request, env, url, execution) {
   const ctx = {
     env,
     db: env.DB,
     tz: env.APP_TIMEZONE || 'Asia/Almaty',
     ip: request.headers.get('CF-Connecting-IP') || 'local',
+    origin: url.origin,
+    waitUntil: (promise) => (execution?.waitUntil ? execution.waitUntil(promise) : promise),
   };
   for (const [method, pattern, handler, access] of ROUTES) {
     const match = pattern.exec(url.pathname);
@@ -150,11 +190,11 @@ const MANIFESTS = {
 const under = (pathname, prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`);
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, execution) {
     const url = new URL(request.url);
     try {
       await ensureReady(env);
-      if (url.pathname.startsWith('/api/')) return await handleApi(request, env, url);
+      if (url.pathname.startsWith('/api/')) return await handleApi(request, env, url, execution);
 
       const manifest = MANIFESTS[url.pathname];
       if (manifest) {

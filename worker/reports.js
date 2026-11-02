@@ -3,7 +3,7 @@ import { badRequest } from '../server/errors.js';
 import { daysInMonth, isDay, isMonth, localParts, nextMonth } from './time.js';
 import { PAYMENT_REPORT_SQL, paymentBreakdown } from '../server/orderLines.js';
 
-function resolveRange(period, date, timeZone) {
+export function resolveRange(period, date, timeZone) {
   const now = localParts(timeZone);
   switch (period) {
     case 'day': {

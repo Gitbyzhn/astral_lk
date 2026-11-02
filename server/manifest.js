@@ -52,10 +52,13 @@ export function buildManifest(kind, businessName) {
       id: '/kassa/',
       name: `${businessName} — Касса`,
       short_name: 'Касса',
-      description: 'Билет беру және бүгінгі сатылым',
+      description: 'Билет беру, кезек және бүгінгі сатылым',
       start_url: '/kassa/',
       scope: '/kassa/',
-      shortcuts: [{ name: 'Сатылым', url: '/kassa/sales', icons: SHORTCUT_ICONS }],
+      shortcuts: [
+        { name: 'Кезек', url: '/kassa/queue', icons: SHORTCUT_ICONS },
+        { name: 'Сатылым', url: '/kassa/sales', icons: SHORTCUT_ICONS },
+      ],
     };
   }
 

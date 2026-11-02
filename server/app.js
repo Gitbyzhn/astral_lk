@@ -7,8 +7,10 @@ import { createAuth } from './auth.js';
 import { createSettings } from './services/settings.js';
 import { createTicketTypes } from './services/ticketTypes.js';
 import { createOrders } from './services/orders.js';
-import { createReports } from './services/reports.js';
+import { createReports, resolveRange } from './services/reports.js';
 import { createPaymentMethods } from './services/paymentMethods.js';
+import { createPush } from './services/push.js';
+import { deleteTarget } from './orderLines.js';
 import { buildManifest } from './manifest.js';
 
 const PUBLIC_DIR = path.join(ROOT_DIR, 'public');
@@ -64,6 +66,10 @@ export function createApp({ db, events, options = {} }) {
   const payments = createPaymentMethods(db, settings);
   const orders = createOrders(db, { ttlHours: opts.queueTtlHours, payments });
   const reports = createReports(db);
+  const push = createPush(db, settings, { origin: opts.publicUrl, hosts: opts.pushHosts, allowInsecure: opts.pushAllowInsecure });
+  /** Кезек өзгергенде клиенттердің телефонына хабарлама (жауапты күттірмейді). */
+  const notify = (calledId = null) =>
+    push.notifyQueue({ calledId }).catch((err) => console.error('push', err?.message ?? err));
 
   if (!settings.get('seeded')) {
     types.seedExamples();
@@ -95,6 +101,9 @@ export function createApp({ db, events, options = {} }) {
     res.json({ ...orders.publicView(req.params.code), business: settings.publicInfo() }),
   );
   api.get('/public/board', (_req, res) => res.json({ ...orders.board(), business: settings.publicInfo() }));
+  // Клиенттің телефонына хабарлама: «Хабарлау» басқанда жазылу, service worker push алғанда — не болғанын сұрау
+  api.post('/public/orders/:code/push', (req, res) => res.json(push.subscribe(req.params.code, req.body)));
+  api.post('/public/push/pending', (req, res) => res.json(push.pending(req.body?.endpoint)));
 
   // Кіру
   api.post('/auth/login', (req, res) => res.json(auth.login(req.body?.password, req.ip)));
@@ -105,6 +114,18 @@ export function createApp({ db, events, options = {} }) {
     events.emit('queue');
     res.status(201).json(order);
   };
+  const queueNext = (_req, res) => {
+    const called = orders.callNext();
+    events.emit('queue');
+    notify(called?.id);
+    res.json({ called, ...orders.queue() });
+  };
+  const patchOrder = (req, res) => {
+    const order = orders.setStatus(req.params.id, req.body?.status);
+    events.emit('queue');
+    notify(order.status === 'serving' ? order.id : null);
+    res.json(order);
+  };
 
   // Касса — әкімші де, кассир де (касса сілтемесі арқылы кірген) қолданады
   const kassa = express.Router();
@@ -114,6 +135,11 @@ export function createApp({ db, events, options = {} }) {
     res.json({ types: types.list(), paymentMethods: payments.list(), defaultPaymentMethodId: payments.defaultId() }),
   );
   kassa.post('/orders', createOrder);
+  // Кезек: «Келесіні шақыру», «Аяқтау», «Қате билет» — әкімші де, кассир де
+  kassa.get('/queue', (_req, res) => res.json(orders.queue()));
+  kassa.post('/queue/next', queueNext);
+  kassa.get('/orders/:id', (req, res) => res.json(orders.get(req.params.id)));
+  kassa.patch('/orders/:id', patchOrder);
   // Кассирге бір күннің қорытындысы: қай билет қанша, қандай төлеммен, және сол күнгі талондар
   kassa.get('/summary', (req, res) => {
     const { date, totals, byType, byPayment } = reports.build('day', req.query.date ? String(req.query.date) : undefined);
@@ -157,18 +183,20 @@ export function createApp({ db, events, options = {} }) {
   });
 
   admin.post('/orders', createOrder); // ескі нұсқамен үйлесімділік (жаңасы — /kassa/orders)
+  // Ескі жолдар (әкімші ғана) — жаңалары /kassa/... астында
   admin.get('/orders/:id', (req, res) => res.json(orders.get(req.params.id)));
-  admin.patch('/orders/:id', (req, res) => {
-    const order = orders.setStatus(req.params.id, req.body?.status);
-    events.emit('queue');
-    res.json(order);
-  });
-
+  admin.patch('/orders/:id', patchOrder);
   admin.get('/queue', (_req, res) => res.json(orders.queue()));
-  admin.post('/queue/next', (_req, res) => {
-    const called = orders.callNext();
+  admin.post('/queue/next', queueNext);
+
+  // Есепті тазалау: кезеңдегі талондар тізімі және оларды біржола өшіру
+  admin.get('/report-orders', (req, res) =>
+    res.json(orders.listRange(resolveRange(String(req.query.period ?? 'day'), req.query.date ? String(req.query.date) : undefined))),
+  );
+  admin.post('/orders/delete', (req, res) => {
+    const deleted = orders.remove(deleteTarget(req.body, resolveRange));
     events.emit('queue');
-    res.json({ called, ...orders.queue() });
+    res.json({ deleted });
   });
 
   admin.get('/reports', (req, res) => {
@@ -246,5 +274,5 @@ export function createApp({ db, events, options = {} }) {
   app.get(['/', '/t/:code', '/board'], (_req, res) => sendPage(res, 'index.html'));
   app.use((_req, res) => sendPage(res.status(404), 'index.html'));
 
-  return { app, services: { settings, auth, types, payments, orders, reports } };
+  return { app, services: { settings, auth, types, payments, orders, reports, push } };
 }

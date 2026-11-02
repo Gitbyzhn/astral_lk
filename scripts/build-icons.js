@@ -28,7 +28,15 @@ const TARGETS = [
   { out: 'public/icons/apple-touch-icon.png', size: 180, kind: 'full', type: 'image/png' },
   { out: 'public/icons/maskable-192.png', size: 192, kind: 'maskable', type: 'image/png' },
   { out: 'public/icons/maskable-512.png', size: 512, kind: 'maskable', type: 'image/png' },
+  // Android хабарламасының кішкентай белгісі: тек ақ сұлба (мөлдір фонда) — үшбұрыш пен есік
+  { out: 'public/icons/badge-96.png', size: 96, kind: 'badge', type: 'image/png' },
 ];
+
+const BADGE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <path d="M48 14 L86 82 H10 Z" fill="none" stroke="#fff" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M38 82 V62 a10 10 0 0 1 20 0 V82" fill="none" stroke="#fff" stroke-width="7"/>
+  <circle cx="48" cy="6" r="5" fill="#fff"/>
+</svg>`;
 
 // require() NODE_PATH-ты да қарайды (глобал орнатылған Playwright үшін).
 const { chromium } = createRequire(import.meta.url)('playwright');
@@ -65,7 +73,12 @@ for (const target of TARGETS) {
         return src;
       };
 
-      if (target.kind === 'mark') {
+      if (target.kind === 'badge') {
+        const badge = new Image();
+        badge.src = `data:image/svg+xml,${encodeURIComponent(target.svg)}`;
+        await badge.decode();
+        ctx.drawImage(badge, 0, 0, size, size);
+      } else if (target.kind === 'mark') {
         ctx.drawImage(scaled(mark[0], mark[1], mark[2], size), 0, 0, size, size);
       } else if (target.kind === 'full') {
         ctx.drawImage(scaled(0, 0, full, size), 0, 0, size, size);
@@ -99,7 +112,7 @@ for (const target of TARGETS) {
       }
       return canvas.toDataURL(target.type, target.quality);
     },
-    { source, target, mark: MARK },
+    { source, target: { ...target, svg: BADGE_SVG }, mark: MARK },
   );
   const out = path.join(ROOT, target.out);
   await fs.mkdir(path.dirname(out), { recursive: true });
@@ -110,7 +123,7 @@ for (const target of TARGETS) {
 await browser.close();
 
 // PNG-лерді 256 түске ықшамдау (көзге айырмашылығы жоқ, файл 2–3 есе кіші). Python + Pillow болса ғана.
-const pngs = TARGETS.filter((t) => t.type === 'image/png').map((t) => path.join(ROOT, t.out));
+const pngs = TARGETS.filter((t) => t.type === 'image/png' && t.kind !== 'badge').map((t) => path.join(ROOT, t.out));
 const PY = `
 import sys
 from PIL import Image

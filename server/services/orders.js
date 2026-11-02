@@ -69,6 +69,8 @@ export function createOrders(db, { ttlHours = 12, payments }) {
     ORDER BY COALESCE(done_at, created_at) DESC, id DESC LIMIT 30
   `);
   const dayRows = db.prepare('SELECT * FROM orders WHERE day = ? ORDER BY id DESC LIMIT 100');
+  const rangeWhere = (range) => (range.from ? 'day BETWEEN @from AND @to' : '1 = 1');
+  const rangeParams = (range) => (range.from ? { from: range.from, to: range.to } : {});
   const dayStats = db.prepare(`
     SELECT
       COUNT(*) AS orders,
@@ -189,6 +191,37 @@ export function createOrders(db, { ttlHours = 12, payments }) {
 
     /** Кассаға: бір күннің тапсырыстары (ең жаңасы бірінші) — QR-ды қайта көрсету үшін. */
     dayOrders: (day) => hydrate(dayRows.all(day)),
+
+    /**
+     * Есеп кезеңіндегі талондар (ең жаңасы бірінші), есепті тазалау үшін.
+     * @param {{ from: string | null, to: string | null }} range
+     */
+    listRange(range, limit = 300) {
+      const where = rangeWhere(range);
+      const params = rangeParams(range);
+      const total = db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE ${where}`).get(params).n;
+      const rows = db.prepare(`SELECT * FROM orders WHERE ${where} ORDER BY id DESC LIMIT ${Number(limit) | 0}`).all(params);
+      return { total, orders: hydrate(rows) };
+    },
+
+    /**
+     * Талондарды біржола өшіру (есептен де, кезектен де): тізім бойынша немесе бүкіл кезеңді.
+     * @param {{ ids?: number[], range?: { from: string | null, to: string | null } }} target
+     */
+    remove: db.transaction(({ ids, range }) => {
+      let where;
+      let params;
+      if (range) {
+        where = rangeWhere(range);
+        params = rangeParams(range);
+      } else {
+        where = 'id IN (SELECT value FROM json_each(@ids))';
+        params = { ids: JSON.stringify(ids) };
+      }
+      db.prepare(`DELETE FROM push_subscriptions WHERE order_id IN (SELECT id FROM orders WHERE ${where})`).run(params);
+      db.prepare(`DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE ${where})`).run(params);
+      return db.prepare(`DELETE FROM orders WHERE ${where}`).run(params).changes;
+    }),
 
     /** Клиентке: тек өз талоны және кезектегі орны (басқалардың деректері берілмейді). */
     publicView(code) {

@@ -1,10 +1,11 @@
-// Касса кабинеті (/kassa): кассир тек билет береді және сатылымды көреді.
+// Касса кабинеті (/kassa): кассир билет береді, кезекті басқарады және сатылымды көреді.
 // Кіру — әкімші берген касса сілтемесі арқылы (/kassa#key=…), аккаунтсыз.
 import { auth } from '../core/api.js';
 import { onLangChange, t } from '../core/i18n.js';
 import { createRouter } from '../core/router.js';
 import { createAdminApp } from '../admin/app.js';
 import { cashierPage } from '../admin/cashier.js';
+import { queuePage } from '../admin/queue.js';
 import { kassaLoginView } from './login.js';
 import { salesPage } from './sales.js';
 
@@ -12,6 +13,7 @@ auth.use('kassa');
 
 const KASSA_NAV = [
   { path: '/kassa', icon: 'ticket', label: () => t('cashier'), page: cashierPage },
+  { path: '/kassa/queue', icon: 'queue', label: () => t('queue'), page: queuePage, badge: true },
   { path: '/kassa/sales', icon: 'receipt', label: () => t('sales'), page: salesPage },
 ];
 

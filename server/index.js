@@ -10,6 +10,7 @@ const { app, services } = createApp({ db, events });
 // Ұмытылған ескі талондарды мезгіл-мезгіл жабу.
 const sweep = () => {
   if (services.orders.expireStale() > 0) events.emit('queue');
+  services.push.cleanup();
 };
 sweep();
 setInterval(sweep, 60_000).unref();

@@ -41,6 +41,11 @@ export function chime() {
   });
 }
 
+/** Кезек келгенде: «дың-дың» бірнеше рет (≈3 секунд), бет ашық тұрғанда. */
+export function alarm(times = 3) {
+  for (let i = 0; i < times; i++) setTimeout(chime, i * 1100);
+}
+
 export function vibrate(pattern = [300, 120, 300, 120, 600]) {
   try {
     navigator.vibrate?.(pattern);

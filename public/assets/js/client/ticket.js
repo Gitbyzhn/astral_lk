@@ -1,9 +1,10 @@
 import { h, mount } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { t } from '../core/i18n.js';
+import { getLang, t } from '../core/i18n.js';
 import { api } from '../core/api.js';
 import { dateTime, money, num } from '../core/format.js';
-import { chime, unlockAudio, vibrate } from '../core/media.js';
+import { alarm, chime, unlockAudio, vibrate } from '../core/media.js';
+import { isIos, isStandalone } from '../core/pwa.js';
 import { copyText, emptyState, spinner, statusChip, toast } from '../core/ui.js';
 import { env } from '../core/env.js';
 import { clientHeader } from './common.js';
@@ -33,6 +34,41 @@ export function ticketPage({ params, info }) {
   const unlock = () => unlockAudio();
   document.addEventListener('pointerdown', unlock, { once: true });
 
+  /* ---------------- Хабарлама (Web Push): телефон құлыптаулы болса да келеді ---------------- */
+  let pushOn = false;
+  const notifySupported = () => 'Notification' in window;
+  const permission = () => (notifySupported() ? Notification.permission : 'unsupported');
+
+  const keyBytes = (b64) => Uint8Array.from(atob((b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+  const sameKey = (buffer, bytes) => {
+    if (!buffer) return false;
+    const a = new Uint8Array(buffer);
+    return a.length === bytes.length && a.every((v, i) => v === bytes[i]);
+  };
+  const swReady = () =>
+    'serviceWorker' in navigator ? Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 5000))]) : Promise.resolve(null);
+
+  /** Осы талонға push жазылымы: «Сіздің кезегіңіз келді!» хабарламасы сервердің өзінен келеді. */
+  async function subscribePush() {
+    if (env.artifact || !info.pushKey || permission() !== 'granted' || !('PushManager' in window)) return false;
+    try {
+      const reg = await swReady();
+      if (!reg?.pushManager) return false;
+      const key = keyBytes(info.pushKey);
+      let sub = await reg.pushManager.getSubscription();
+      if (sub && !sameKey(sub.options?.applicationServerKey, key)) {
+        await sub.unsubscribe();
+        sub = null;
+      }
+      sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      await api(`/public/orders/${encodeURIComponent(code)}/push`, { method: 'POST', body: { endpoint: sub.endpoint, lang: getLang() } });
+      pushOn = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
 
   async function load() {
     try {
@@ -42,6 +78,8 @@ export function ticketPage({ params, info }) {
       failed = null;
       maxAhead = rememberTicket(next.order, next.queue.ahead).maxAhead;
       if (prev) react(prev, next);
+      // Бұрын «Хабарлау» қосылған болса — бұл талонға да жазыламыз (бір рет)
+      else if (notifyOn && next.order.status === 'waiting') subscribePush();
       render();
     } catch (err) {
       if (err.status === 404) {
@@ -60,9 +98,10 @@ export function ticketPage({ params, info }) {
     const called = order.status === 'serving' && (prev.order.status !== 'serving' || prev.order.calledAt !== order.calledAt);
     if (called) {
       vibrate();
-      chime();
+      alarm();
       document.title = `🔔 ${t('your_turn')}`;
-      if (notifyOn && 'Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+      // Push жоқ болса ғана (мысалы, iPhone Safari): беттің өз хабарламасы
+      if (!pushOn && notifyOn && permission() === 'granted' && document.visibilityState !== 'visible') {
         navigator.serviceWorker?.ready
           .then((reg) =>
             reg.showNotification(t('your_turn'), {
@@ -70,7 +109,7 @@ export function ticketPage({ params, info }) {
               tag: `turn-${order.code}`,
               renotify: true,
               icon: '/icons/icon-192.png',
-              badge: '/icons/icon-192.png',
+              badge: '/icons/badge-96.png',
               vibrate: [300, 120, 300, 120, 600],
               data: { url: location.href },
             }),
@@ -85,7 +124,7 @@ export function ticketPage({ params, info }) {
 
   async function enableNotify() {
     unlockAudio();
-    if ('Notification' in window && Notification.permission === 'default') {
+    if (permission() === 'default') {
       try {
         await Notification.requestPermission();
       } catch {
@@ -100,7 +139,9 @@ export function ticketPage({ params, info }) {
     }
     chime();
     vibrate([120]);
-    toast(t('notify_on'));
+    const pushed = await subscribePush();
+    if (permission() === 'denied') toast(t('notify_blocked'), 'error');
+    else toast(pushed ? t('notify_on_push') : t('notify_on'));
     render();
   }
 
@@ -228,6 +269,9 @@ export function ticketPage({ params, info }) {
       ticket,
       actions,
       canNotify && !notifyOn && h('p', { class: 'hint', style: { textAlign: 'center', marginTop: '-6px' } }, t('notify_hint')),
+      // iPhone: хабарлама тек басты экранға қосылған қосымшада келеді
+      canNotify && isIos() && !isStandalone() && h('p', { class: 'hint', style: { textAlign: 'center' } }, t('notify_ios_hint')),
+      canNotify && notifyOn && permission() === 'denied' && h('p', { class: 'hint', style: { textAlign: 'center', color: '#fcd34d' } }, t('notify_blocked')),
       items,
       h(
         'footer',

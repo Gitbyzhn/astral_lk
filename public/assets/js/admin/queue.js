@@ -3,10 +3,13 @@ import { icon } from '../core/icons.js';
 import { errorText, t } from '../core/i18n.js';
 import { api } from '../core/api.js';
 import { ago, itemsSummary, money, num, time } from '../core/format.js';
-import { emptyState, spinner, statusChip, toast, withBusy } from '../core/ui.js';
+import { confirmDialog, emptyState, spinner, statusChip, toast, withBusy } from '../core/ui.js';
 import { pageHead, showOrderModal } from './shared.js';
 
-/** Кезек: қазір шақырылған топ, «Келесіні шақыру», күтудегілер және бүгін аяқталғандар. */
+/**
+ * Кезек: қазір шақырылған топ («Қате билет», «Қайта шақыру»), «Келесіні шақыру» (алдыңғы топты өзі
+ * аяқтайды), күтудегілер және бүгін аяқталғандар. Әкімші бетінде де, касса кабинетінде де бірдей.
+ */
 export function queuePage({ setBadge }) {
   const el = h('div', { class: 'page' }, pageHead(t('queue'), t('queue_lead')), spinner());
   let data = null;
@@ -20,7 +23,7 @@ export function queuePage({ setBadge }) {
     }
     loading = true;
     try {
-      data = await api('/admin/queue');
+      data = await api('/kassa/queue');
       setBadge(data.waiting.length);
       render();
     } catch (err) {
@@ -37,7 +40,7 @@ export function queuePage({ setBadge }) {
   async function callNext(button) {
     await withBusy(button, async () => {
       try {
-        const result = await api('/admin/queue/next', { method: 'POST' });
+        const result = await api('/kassa/queue/next', { method: 'POST' });
         data = result;
         setBadge(data.waiting.length);
         render();
@@ -51,13 +54,25 @@ export function queuePage({ setBadge }) {
   async function setStatus(button, order, status) {
     await withBusy(button, async () => {
       try {
-        await api(`/admin/orders/${order.id}`, { method: 'PATCH', body: { status } });
+        await api(`/kassa/orders/${order.id}`, { method: 'PATCH', body: { status } });
         if (status === 'serving') toast(t('called_toast', { n: order.number }));
+        if (status === 'cancelled') toast(t('cancelled_toast', { n: order.number }));
         await load();
       } catch (err) {
         toast(errorText(err), 'error');
       }
     });
+  }
+
+  /** «Қате билет»: талон кезектен алынады және есепке кірмейді (растаудан кейін). */
+  async function markWrong(button, order) {
+    const ok = await confirmDialog({
+      title: t('order_title', { n: order.number }),
+      message: t('cancel_order_confirm', { n: order.number }),
+      confirmText: t('cancel_order'),
+      danger: true,
+    });
+    if (ok) await setStatus(button, order, 'cancelled');
   }
 
   const openOrder = (order) => showOrderModal(order, { onChanged: load });
@@ -97,7 +112,8 @@ export function queuePage({ setBadge }) {
       h(
         'div',
         { class: 'now-actions' },
-        h('button', { class: 'btn btn-success', onclick: (e) => setStatus(e.currentTarget, current, 'done') }, icon('check'), t('finish')),
+        // «Аяқтау» жоқ: «Келесіні шақыру» қазіргі топты өзі аяқтайды
+        h('button', { class: 'btn btn-danger', onclick: (e) => markWrong(e.currentTarget, current) }, icon('x'), t('cancel_order')),
         h('button', { class: 'btn btn-soft', onclick: (e) => setStatus(e.currentTarget, current, 'serving') }, icon('megaphone'), t('recall')),
       ),
       nextBtn,
@@ -145,7 +161,22 @@ export function queuePage({ setBadge }) {
             },
             t('call'),
           )
-        : statusChip(order.status),
+        : order.status === 'cancelled'
+          ? statusChip('cancelled')
+          : // Қоқыс жәшігі: «Қате билет» — есептен алынып тасталады (растаудан кейін)
+            h(
+              'button',
+              {
+                class: 'btn btn-danger btn-icon btn-sm',
+                'aria-label': `${t('cancel_order')}: №${order.number}`,
+                title: t('cancel_order'),
+                onclick: (e) => {
+                  e.stopPropagation();
+                  markWrong(e.currentTarget, order);
+                },
+              },
+              icon('trash'),
+            ),
     );
   }
 

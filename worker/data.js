@@ -1,7 +1,9 @@
 // D1 деректер базасы: схема (нұсқалары бойынша), бастапқы деректер, баптаулар, өзгеріс есептегіштері.
 import schema1 from '../migrations/0001_init.sql';
 import schema2 from '../migrations/0002_payments_kassa.sql';
+import schema3 from '../migrations/0003_push.sql';
 import { hashPassword, generateAdminKey } from './auth.js';
+import { generateVapidKeys } from '../server/webpush.js';
 import { nowIso } from './time.js';
 
 const split = (sql) =>
@@ -11,7 +13,7 @@ const split = (sql) =>
     .filter(Boolean);
 
 /** Схема нұсқалары: жаңасы тізім соңына қосылады, бұрынғылары өзгертілмейді. */
-const MIGRATIONS = [schema1, schema2].map(split);
+const MIGRATIONS = [schema1, schema2, schema3].map(split);
 const ADD_COLUMN = /^ALTER\s+TABLE\s+\S+\s+ADD\s+COLUMN/i;
 
 const EXAMPLE_TYPES = [
@@ -70,6 +72,12 @@ async function init(env) {
   if (!settings.has('auth_secret')) put('auth_secret', generateAdminKey(43));
   if (!settings.has('admin_key')) put('admin_key', generateAdminKey());
   if (!settings.has('cashier_key')) put('cashier_key', generateAdminKey());
+  // Клиент телефонына хабарлама (Web Push) кілттері — бір batch ішінде, екеуі бірге жазылады
+  if (!settings.has('vapid_public') || !settings.has('vapid_private')) {
+    const { publicKey, privateJwk } = await generateVapidKeys();
+    put('vapid_public', publicKey);
+    put('vapid_private', privateJwk);
+  }
   if (!settings.has('password_version')) put('password_version', 1);
   if (!settings.has('admin_password')) {
     const initial = env.ADMIN_PASSWORD || 'admin';

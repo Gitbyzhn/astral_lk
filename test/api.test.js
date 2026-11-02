@@ -1,5 +1,6 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { openDatabase } from '../server/db.js';
 import { createEventHub } from '../server/events.js';
 import { createApp } from '../server/app.js';
@@ -25,7 +26,12 @@ async function call(path, { method = 'GET', body, auth = true, raw = false } = {
 before(async () => {
   db = openDatabase(':memory:');
   events = createEventHub({ heartbeatMs: 60_000 });
-  const created = createApp({ db, events, options: { initialPassword: 'admin', trustProxy: false } });
+  const created = createApp({
+    db,
+    events,
+    // Тесттегі жалған push қызметі 127.0.0.1-де (шынайы ортада тек https push қызметтері)
+    options: { initialPassword: 'admin', trustProxy: false, pushHosts: ['127.0.0.1'], pushAllowInsecure: true },
+  });
   services = created.services;
   const { app } = created;
   await new Promise((resolve) => {
@@ -608,5 +614,178 @@ describe('касса кабинеті (кассир)', () => {
     const manifest = await (await fetch(`${base}/kassa/manifest.webmanifest`)).json();
     assert.equal(manifest.scope, '/kassa/');
     assert.equal(manifest.short_name, 'Касса');
+  });
+});
+
+describe('кассирдің кезегі және «Қате билет»', () => {
+  let cashier;
+  const asCashier = (path, options = {}) => {
+    const saved = token;
+    token = cashier;
+    return call(path, options).finally(() => {
+      token = saved;
+    });
+  };
+
+  test('кассир кезекті көреді, шақырады, қате деп белгілейді', async () => {
+    const { data: s } = await call('/api/admin/settings');
+    cashier = (await call('/api/auth/key', { method: 'POST', body: { key: s.cashierKey }, auth: false })).data.token;
+
+    const order = (await asCashier('/api/kassa/orders', { method: 'POST', body: { items: [{ ticketTypeId: 1, qty: 1 }] } })).data;
+    const queue = await asCashier('/api/kassa/queue');
+    assert.equal(queue.status, 200);
+    assert.ok(queue.data.waiting.some((o) => o.id === order.id));
+
+    const next = await asCashier('/api/kassa/queue/next', { method: 'POST' });
+    assert.equal(next.status, 200);
+
+    const before = (await call('/api/admin/reports?period=day')).data.totals;
+    const wrong = await asCashier(`/api/kassa/orders/${order.id}`, { method: 'PATCH', body: { status: 'cancelled' } });
+    assert.equal(wrong.status, 200);
+    assert.equal(wrong.data.status, 'cancelled');
+    const after = (await call('/api/admin/reports?period=day')).data.totals;
+    assert.equal(after.revenue, before.revenue - 2000, '«Қате билет» есепке кірмейді');
+    assert.equal(after.cancelled, before.cancelled + 1);
+    assert.equal((await asCashier(`/api/kassa/orders/${order.id}`)).data.status, 'cancelled');
+  });
+
+  test('кассирге есепті тазалау жабық', async () => {
+    assert.equal((await asCashier('/api/admin/report-orders?period=day')).status, 403);
+    assert.equal((await asCashier('/api/admin/orders/delete', { method: 'POST', body: { ids: [1] } })).status, 403);
+  });
+});
+
+describe('есепті тазалау (талондарды өшіру)', () => {
+  test('кезеңдегі талондар тізімі', async () => {
+    const res = await call('/api/admin/report-orders?period=day');
+    assert.equal(res.status, 200);
+    assert.ok(res.data.total >= 5);
+    assert.equal(res.data.orders.length, Math.min(res.data.total, 300));
+    const ids = res.data.orders.map((o) => o.id);
+    assert.deepEqual(ids, [...ids].sort((a, b) => b - a), 'ең жаңасы бірінші');
+    assert.ok(res.data.orders[0].items.length > 0);
+    assert.equal((await call('/api/admin/report-orders?period=year')).status, 400);
+  });
+
+  test('таңдалған талондарды өшіру — есептен де, клиенттен де жоғалады', async () => {
+    const order = (await call('/api/kassa/orders', { method: 'POST', body: { items: [{ ticketTypeId: 3, qty: 2 }] } })).data;
+    const before = (await call('/api/admin/reports?period=day')).data.totals;
+    const res = await call('/api/admin/orders/delete', { method: 'POST', body: { ids: [order.id, order.id] } });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.deleted, 1);
+    const after = (await call('/api/admin/reports?period=day')).data.totals;
+    assert.equal(after.revenue, before.revenue - 10000);
+    assert.equal(after.orders, before.orders - 1);
+    assert.equal((await call(`/api/public/orders/${order.code}`, { auth: false })).status, 404);
+    for (const body of [{}, { ids: [] }, { ids: ['x'] }, { ids: [1.5] }]) {
+      const bad = await call('/api/admin/orders/delete', { method: 'POST', body });
+      assert.equal(bad.status, 400, JSON.stringify(body));
+      assert.equal(bad.data.error, 'invalid_ids');
+    }
+  });
+
+  test('«Барлығын таңдау»: бүкіл кезеңді өшіру, нөмірлеу қайта 1-ден', async () => {
+    const res = await call('/api/admin/orders/delete', { method: 'POST', body: { all: true, period: 'day' } });
+    assert.equal(res.status, 200);
+    assert.ok(res.data.deleted > 0);
+    const list = await call('/api/admin/report-orders?period=day');
+    assert.equal(list.data.total, 0);
+    const report = await call('/api/admin/reports?period=day');
+    assert.equal(report.data.totals.revenue, 0);
+    assert.equal(report.data.totals.cancelled, 0);
+    const fresh = await call('/api/kassa/orders', { method: 'POST', body: { items: [{ ticketTypeId: 1, qty: 1 }] } });
+    assert.equal(fresh.data.number, 1);
+    await call('/api/admin/orders/delete', { method: 'POST', body: { ids: [fresh.data.id] } });
+  });
+});
+
+describe('клиент телефонына хабарлама (Web Push)', () => {
+  let pushServer;
+  let pushBase;
+  const received = [];
+  const waitFor = async (predicate, ms = 3000) => {
+    const started = Date.now();
+    while (!predicate()) {
+      if (Date.now() - started > ms) return false;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return true;
+  };
+
+  before(async () => {
+    pushServer = http.createServer((req, res) => {
+      received.push({ path: req.url, headers: req.headers });
+      res.statusCode = req.url.includes('gone') ? 410 : 201;
+      res.end();
+    });
+    await new Promise((resolve) => pushServer.listen(0, '127.0.0.1', resolve));
+    pushBase = `http://127.0.0.1:${pushServer.address().port}`;
+  });
+  after(() => pushServer.close());
+
+  const b64 = (s) => Uint8Array.from(Buffer.from(s, 'base64url'));
+  const pending = async (endpoint) => (await call('/api/public/push/pending', { method: 'POST', body: { endpoint }, auth: false })).data.orders;
+
+  test('жазылу: тек push қызметтері, тек ашық талон', async () => {
+    const order = (await call('/api/kassa/orders', { method: 'POST', body: { items: [{ ticketTypeId: 1, qty: 1 }] } })).data;
+    const sub = (endpoint, code = order.code) => call(`/api/public/orders/${code}/push`, { method: 'POST', body: { endpoint, lang: 'ru' }, auth: false });
+    assert.equal((await sub('https://evil.example.com/x')).data.error, 'invalid_push');
+    assert.equal((await sub('not a url')).data.error, 'invalid_push');
+    assert.equal((await sub(`${pushBase}/push/x`, 'zzzzzzzzzz')).status, 404);
+    assert.equal((await sub(`${pushBase}/push/x`)).status, 200);
+    await call(`/api/kassa/orders/${order.id}`, { method: 'PATCH', body: { status: 'cancelled' } });
+    assert.equal((await sub(`${pushBase}/push/y`)).data.error, 'order_closed');
+    await call('/api/admin/orders/delete', { method: 'POST', body: { ids: [order.id] } });
+  });
+
+  test('«Келесі — сіз» бір рет, «Кезегіңіз келді» әр шақыруда, ескірген жазылым өшеді', async () => {
+    const info = (await call('/api/public/info', { auth: false })).data;
+    assert.match(info.pushKey, /^[A-Za-z0-9_-]{87}$/, 'VAPID ашық кілті (65 байт)');
+    const make = async () => (await call('/api/kassa/orders', { method: 'POST', body: { items: [{ ticketTypeId: 2, qty: 1 }] } })).data;
+    const [a, b, c] = [await make(), await make(), await make()];
+    const bEnd = `${pushBase}/push/b`;
+    const cEnd = `${pushBase}/push/c-gone`;
+    await call(`/api/public/orders/${b.code}/push`, { method: 'POST', body: { endpoint: bEnd, lang: 'ru' }, auth: false });
+    await call(`/api/public/orders/${c.code}/push`, { method: 'POST', body: { endpoint: cEnd }, auth: false });
+    received.length = 0;
+
+    // a шақырылады → b кезекте бірінші → «Келесі — сіз»
+    const first = await call('/api/kassa/queue/next', { method: 'POST' });
+    assert.equal(first.data.called.id, a.id);
+    assert.ok(await waitFor(() => received.some((r) => r.path === '/push/b')), 'b-ға push келді');
+    assert.deepEqual(await pending(bEnd), [{ code: b.code, number: b.number, status: 'waiting', lang: 'ru' }]);
+
+    // VAPID: қолтаңба ашық кілтпен тексеріледі
+    const auth = received.find((r) => r.path === '/push/b').headers.authorization;
+    const [, jwt, k] = /^vapid t=([^,]+), k=(.+)$/.exec(auth);
+    assert.equal(k, info.pushKey);
+    const [h64, p64, s64] = jwt.split('.');
+    const key = await crypto.subtle.importKey('raw', b64(info.pushKey), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, b64(s64), new TextEncoder().encode(`${h64}.${p64}`)));
+    const claims = JSON.parse(Buffer.from(p64, 'base64url').toString());
+    assert.equal(claims.aud, pushBase);
+    assert.ok(claims.exp > Date.now() / 1000 && claims.sub);
+    assert.equal(received.find((r) => r.path === '/push/b').headers.ttl, '3600');
+
+    // b шақырылады → «Кезегіңіз келді»; c бірінші → push 410 → жазылым өшеді
+    received.length = 0;
+    await call('/api/kassa/queue/next', { method: 'POST' });
+    assert.ok(await waitFor(() => received.some((r) => r.path === '/push/b') && received.some((r) => r.path === '/push/c-gone')));
+    assert.deepEqual(await pending(bEnd), [{ code: b.code, number: b.number, status: 'serving', lang: 'ru' }]);
+    let gone = false;
+    for (let i = 0; i < 50 && !gone; i++) {
+      gone = (await pending(cEnd)).length === 0;
+      if (!gone) await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(gone, '410 — жазылым өшірілді');
+
+    // Қайта шақыру → тағы хабарлама; «Келесі — сіз» қайталанбайды
+    received.length = 0;
+    await call(`/api/kassa/orders/${b.id}`, { method: 'PATCH', body: { status: 'serving' } });
+    assert.ok(await waitFor(() => received.some((r) => r.path === '/push/b')));
+    assert.equal(received.filter((r) => r.path === '/push/b').length, 1);
+
+    await call('/api/admin/orders/delete', { method: 'POST', body: { ids: [a.id, b.id, c.id] } });
+    assert.deepEqual(await pending(bEnd), []);
   });
 });

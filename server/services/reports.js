@@ -3,7 +3,7 @@ import { daysInMonth, isDay, isMonth, localParts, nextMonth } from '../time.js';
 import { PAYMENT_REPORT_SQL, paymentBreakdown } from '../orderLines.js';
 
 /** Кезең → күндер аралығы және графиктің топтау қадамы. */
-function resolveRange(period, date) {
+export function resolveRange(period, date) {
   const now = localParts();
   switch (period) {
     case 'day': {

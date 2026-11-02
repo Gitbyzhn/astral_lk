@@ -1477,6 +1477,16 @@ input[type='month'].input {
   margin-top: 18px;
 }
 
+/* Тар телефонда «Қате билет» мен «Қайта шақыру» карточкадан шығып кетпеуі үшін */
+.now-actions > .btn {
+  min-width: 0;
+  padding-left: 10px;
+  padding-right: 10px;
+  white-space: normal;
+  line-height: 1.2;
+}
+
+
 .next-btn {
   margin-top: 14px;
 }
@@ -3084,4 +3094,119 @@ input[type='month'].input {
   .kpis.kpis-3 {
     grid-template-columns: 1.4fr repeat(2, 1fr);
   }
+}
+
+/* ---------------------------------------------------------------------
+   Есеп: «Сатылған билет» карточкасы → тізім, таңдап өшіру
+   --------------------------------------------------------------------- */
+.kpi-action {
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    transform 0.1s;
+}
+
+.kpi-action:hover {
+  border-color: var(--line-2);
+}
+
+.kpi-action:active {
+  transform: scale(0.99);
+}
+
+.kpi-action .kpi-go {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  color: var(--text-3);
+}
+
+.kpi-link {
+  color: var(--primary-text);
+  font-weight: 650;
+}
+
+.check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.sold {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 120px;
+}
+
+.sold-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sold-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.sold-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sold-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.sold-row:first-child {
+  border-top: 0;
+}
+
+.sold-row .qnum {
+  min-width: 48px;
+  height: 42px;
+  font-size: 17px;
+}
+
+.sold-row .qmeta {
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.sold-row.is-cancelled .qitems,
+.sold-row.is-cancelled .sold-sum {
+  color: var(--text-3);
+}
+
+.sold-sum {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Талон терезесіндегі әрекеттер: шақыру, қайта шақыру, кезекке қайтару, «Қате билет» */
+.order-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
 }

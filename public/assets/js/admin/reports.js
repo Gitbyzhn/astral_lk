@@ -2,8 +2,9 @@ import { h, mount } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { errorText, t } from '../core/i18n.js';
 import { api } from '../core/api.js';
-import { dayLabel, money, monthLabel, num, todayKey } from '../core/format.js';
-import { emptyState, spinner, toast } from '../core/ui.js';
+import { dateTime, dayLabel, itemsSummary, money, monthLabel, num, paymentTotals, todayKey } from '../core/format.js';
+import { confirmDialog, emptyState, openModal, spinner, statusChip, toast, withBusy } from '../core/ui.js';
+import { env } from '../core/env.js';
 import { dateNav, pageHead, paymentBreakdown, paymentLabel, typesTable } from './shared.js';
 import { columnChart } from './chart.js';
 
@@ -86,6 +87,8 @@ export function reportsPage() {
   }
 
   /* ------------------------------ Карточкалар ------------------------------ */
+  const dateParam = () => (state.period === 'day' ? state.day : state.period === 'month' ? state.month : '');
+
   function kpis() {
     const { totals } = report;
     const tile = (cls, iconName, label, value, sub) =>
@@ -96,14 +99,172 @@ export function reportsPage() {
         h('div', { class: 'kpi-value' }, value),
         sub && h('div', { class: 'kpi-sub' }, sub),
       );
+    // «Сатылған билет» — басса, кезеңдегі талондар тізімі ашылады (таңдап өшіру — есепті тазалау)
+    const soldTile = env.artifact
+      ? tile('', 'ticket', t('tickets_sold'), num(totals.people), t('people_unit'))
+      : h(
+          'button',
+          { class: 'card kpi kpi-action', type: 'button', 'aria-haspopup': 'dialog', onclick: openSoldList },
+          h('div', { class: 'kpi-label' }, icon('ticket'), t('tickets_sold'), icon('chevronRight', 'icon kpi-go')),
+          h('div', { class: 'kpi-value' }, num(totals.people)),
+          h('div', { class: 'kpi-sub' }, `${t('people_unit')} · `, h('span', { class: 'kpi-link' }, t('sold_list_hint'))),
+        );
     return h(
       'div',
       { class: 'kpis' },
       tile('hero', 'wallet', t('revenue'), money(totals.revenue), periodLabel()),
-      tile('', 'ticket', t('tickets_sold'), num(totals.people), t('people_unit')),
+      soldTile,
       tile('', 'users', t('orders_count'), num(totals.orders), totals.cancelled ? t('cancelled_note', { n: totals.cancelled }) : null),
       tile('', 'receipt', t('avg_check'), money(totals.avgCheck), t('per_group')),
     );
+  }
+
+  /* ------------------- Сатылған билеттер: таңдап өшіру (тазалау) ------------------- */
+  function openSoldList() {
+    const period = state.period;
+    const date = dateParam();
+    const label = periodLabel();
+    const selected = new Set();
+    let list = null; // { total, orders }
+    let allMode = false; // «Барлығын таңдау»
+
+    const body = h('div', { class: 'sold' }, spinner());
+    const delBtn = h('button', { class: 'btn btn-danger', disabled: true, onclick: (e) => remove(e.currentTarget) }, icon('trash'), t('delete'));
+    const modal = openModal({
+      title: `${t('sold_list')} · ${label}`,
+      body,
+      wide: true,
+      footer: [h('button', { class: 'btn btn-ghost', onclick: () => modal.close() }, t('close')), delBtn],
+    });
+
+    const truncated = () => list.total > list.orders.length;
+    const count = () => (allMode ? list.total : selected.size);
+
+    function sync() {
+      const n = count();
+      delBtn.disabled = n === 0;
+      mount(delBtn, icon('trash'), n ? `${t('delete')} · ${n}` : t('delete'));
+      for (const box of body.querySelectorAll('input[data-id]')) box.checked = allMode || selected.has(Number(box.dataset.id));
+      const all = body.querySelector('input[data-all]');
+      if (all) {
+        all.checked = allMode;
+        all.indeterminate = !allMode && selected.size > 0;
+      }
+      const counter = body.querySelector('[data-counter]');
+      if (counter) counter.textContent = t('selected_n', { n });
+    }
+
+    function toggle(id, on) {
+      if (allMode) {
+        // «Барлығы» таңдалғаннан кейін біреуін алып тастаса — көрінетін талондардың қалғаны таңдалады
+        allMode = false;
+        for (const order of list.orders) selected.add(order.id);
+      }
+      if (on) selected.add(id);
+      else selected.delete(id);
+      if (!truncated() && selected.size === list.orders.length && list.orders.length) {
+        allMode = true;
+        selected.clear();
+      }
+      sync();
+    }
+
+    function row(order) {
+      const pays = paymentTotals(order.items).filter((p) => p.name);
+      return h(
+        'label',
+        { class: ['sold-row', order.status === 'cancelled' && 'is-cancelled'] },
+        h('input', { class: 'check', type: 'checkbox', 'data-id': String(order.id), onchange: (e) => toggle(order.id, e.target.checked) }),
+        h('div', { class: 'qnum' }, String(order.number)),
+        h(
+          'div',
+          { class: 'qbody' },
+          h('div', { class: 'qitems' }, itemsSummary(order.items)),
+          h(
+            'div',
+            { class: 'qmeta' },
+            h('span', null, dateTime(order.createdAt)),
+            pays.map((p) => h('span', { class: 'pay-tag' }, p.name)),
+            order.status === 'cancelled' && statusChip('cancelled'),
+          ),
+        ),
+        h('div', { class: 'sold-sum' }, money(order.total)),
+      );
+    }
+
+    function draw() {
+      if (!list.orders.length) {
+        mount(body, emptyState({ iconName: 'ticket', title: t('no_orders') }));
+        return;
+      }
+      mount(
+        body,
+        h(
+          'div',
+          { class: 'sold-tools' },
+          h(
+            'label',
+            { class: 'sold-all' },
+            h('input', {
+              class: 'check',
+              type: 'checkbox',
+              'data-all': true,
+              onchange: (e) => {
+                allMode = e.target.checked;
+                selected.clear();
+                sync();
+              },
+            }),
+            t('select_all'),
+          ),
+          h('span', { class: 'faint small' }, t('talon_count', { n: list.total })),
+          h('span', { class: 'spacer' }),
+          h('span', { class: 'small', 'data-counter': true }),
+        ),
+        truncated() && h('p', { class: 'hint' }, t('list_truncated', { shown: list.orders.length, n: list.total })),
+        h('div', { class: 'sold-list' }, list.orders.map(row)),
+      );
+      sync();
+    }
+
+    async function fetchList() {
+      try {
+        list = await api(`/admin/report-orders?period=${period}${date ? `&date=${date}` : ''}`);
+        selected.clear();
+        allMode = false;
+        draw();
+      } catch (err) {
+        toast(errorText(err), 'error');
+        modal.close();
+      }
+    }
+
+    async function remove(button) {
+      const n = count();
+      // Тізім толық болса — тек көрінген талондар (id бойынша); толық емес болса — бүкіл кезең
+      const byRange = allMode && truncated();
+      const ok = await confirmDialog({
+        title: t('delete'),
+        message: byRange ? t('delete_all_confirm', { n }) : t('delete_orders_confirm', { n }),
+        confirmText: t('delete'),
+        danger: true,
+      });
+      if (!ok) return;
+      await withBusy(button, async () => {
+        try {
+          const ids = allMode ? list.orders.map((o) => o.id) : [...selected];
+          const payload = byRange ? { all: true, period, ...(date && { date }) } : { ids };
+          const { deleted } = await api('/admin/orders/delete', { method: 'POST', body: payload });
+          toast(t('orders_deleted', { n: deleted }));
+          await fetchList();
+          load();
+        } catch (err) {
+          toast(errorText(err), 'error');
+        }
+      });
+    }
+
+    fetchList();
   }
 
   /* -------------------------------- График -------------------------------- */

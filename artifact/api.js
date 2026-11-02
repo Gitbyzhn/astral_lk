@@ -281,7 +281,11 @@ async function route(method, path, body) {
     const section = parts[1];
     if (section === 'session' && method === 'GET') return { ok: true, role: 'admin' };
     if (section === 'catalog' && method === 'GET') return { types: typeList(data.catalog), paymentMethods: [], defaultPaymentMethodId: null };
-    if (section === 'orders' && method === 'POST') return createOrder(body?.items);
+    if (section === 'orders' && !parts[2] && method === 'POST') return createOrder(body?.items);
+    if (section === 'orders' && parts[2] && method === 'GET') return view(findOrder(decodeURIComponent(parts[2])));
+    if (section === 'orders' && parts[2] && method === 'PATCH') return setStatus(decodeURIComponent(parts[2]), body?.status);
+    if (section === 'queue' && !parts[2] && method === 'GET') return queueState(data.days, data.catalog, todayKey());
+    if (section === 'queue' && parts[2] === 'next' && method === 'POST') return callNext();
     if (section === 'summary' && method === 'GET') {
       const day = await report('day', params.get('date') ?? undefined);
       return { date: day.date, totals: day.totals, byType: day.byType, byPayment: [], orders: [] };

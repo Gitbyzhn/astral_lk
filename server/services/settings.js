@@ -18,7 +18,8 @@ export function createSettings(db, { timeZone = 'Asia/Almaty', publicUrl = null 
 
     /** Клиентке де көрінетін баптаулар. */
     publicInfo() {
-      return { businessName: get('business_name', DEFAULT_BUSINESS_NAME), timeZone, publicUrl };
+      // pushKey — клиент телефонына хабарлама жазылымы үшін (VAPID ашық кілті)
+      return { businessName: get('business_name', DEFAULT_BUSINESS_NAME), timeZone, publicUrl, pushKey: get('vapid_public') };
     },
 
     update(body) {

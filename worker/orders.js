@@ -58,6 +58,8 @@ async function expireStale(db) {
     .bind(nowIso(), cutoff)
     .run();
   if (result.meta.changes) await bump(db, 'queue').run();
+  // Жабылған талондардың хабарлама жазылымдары керек емес
+  await db.prepare("DELETE FROM push_subscriptions WHERE order_id NOT IN (SELECT id FROM orders WHERE status IN ('waiting', 'serving'))").run();
 }
 
 /* ------------------------------------ Жасау ------------------------------------ */
@@ -235,4 +237,32 @@ export async function board(ctx) {
     next: next.results.map((r) => ({ number: r.number, people: r.people })),
     waiting: waiting.results[0].n,
   };
+}
+
+/* ------------------------------ Есепті тазалау ------------------------------ */
+const rangeWhere = (range) => (range.from ? 'day BETWEEN ? AND ?' : '1 = 1');
+const rangeArgs = (range) => (range.from ? [range.from, range.to] : []);
+
+/** Есеп кезеңіндегі талондар (ең жаңасы бірінші). */
+export async function listRange(db, range, limit = 300) {
+  const where = rangeWhere(range);
+  const args = rangeArgs(range);
+  const [count, rows] = await db.batch([
+    db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE ${where}`).bind(...args),
+    db.prepare(`SELECT * FROM orders WHERE ${where} ORDER BY id DESC LIMIT ${Number(limit) | 0}`).bind(...args),
+  ]);
+  return { total: count.results[0].n, orders: await hydrate(db, rows.results) };
+}
+
+/** Талондарды біржола өшіру: тізім бойынша ({ ids }) немесе бүкіл кезеңді ({ range }). */
+export async function removeOrders(db, { ids, range }) {
+  const where = range ? rangeWhere(range) : 'id IN (SELECT value FROM json_each(?))';
+  const args = range ? rangeArgs(range) : [JSON.stringify(ids)];
+  const results = await db.batch([
+    db.prepare(`DELETE FROM push_subscriptions WHERE order_id IN (SELECT id FROM orders WHERE ${where})`).bind(...args),
+    db.prepare(`DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE ${where})`).bind(...args),
+    db.prepare(`DELETE FROM orders WHERE ${where}`).bind(...args),
+    bump(db, 'queue'),
+  ]);
+  return results[2].meta.changes;
 }

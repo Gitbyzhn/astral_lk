@@ -272,12 +272,12 @@ export function typesTable(rows, totals, { share: withShare = true } = {}) {
 }
 
 /**
- * Талон терезесі: нөмір, QR, билеттер. «issued» — жаңа берілген талон, «details» — кезектегі талон.
- * Кассирде кезекті басқару түймелері жоқ (actions: false).
+ * Талон терезесі: нөмір, QR, билеттер. «issued» — жаңа берілген талон, «details» — кезектегі талон
+ * (шақыру, аяқтау, «Қате билет», кезекке қайтару — әкімші мен кассирге).
  * @param {object} order
  * @param {{ mode?: 'issued' | 'details', onChanged?: () => void, actions?: boolean }} [options]
  */
-export function showOrderModal(order, { mode = 'details', onChanged, actions = store.role === 'admin' } = {}) {
+export function showOrderModal(order, { mode = 'details', onChanged, actions = true } = {}) {
   const url = orderUrl(order);
   const isIssued = mode === 'issued';
 
@@ -288,9 +288,10 @@ export function showOrderModal(order, { mode = 'details', onChanged, actions = s
     }
     await withBusy(button, async () => {
       try {
-        await api(`/admin/orders/${order.id}`, { method: 'PATCH', body: { status } });
+        await api(`/kassa/orders/${order.id}`, { method: 'PATCH', body: { status } });
         modal.close();
         if (status === 'serving') toast(t('called_toast', { n: order.number }));
+        if (status === 'cancelled') toast(t('cancelled_toast', { n: order.number }));
         onChanged?.();
       } catch (err) {
         toast(errorText(err), 'error');
@@ -306,17 +307,15 @@ export function showOrderModal(order, { mode = 'details', onChanged, actions = s
       );
     }
     if (order.status === 'serving') {
-      actionButtons.push(
-        h('button', { class: 'btn btn-success', onclick: (e) => setStatus(e.currentTarget, 'done') }, icon('check'), t('finish')),
-        h('button', { class: 'btn btn-soft', onclick: (e) => setStatus(e.currentTarget, 'serving') }, icon('megaphone'), t('recall')),
-      );
+      actionButtons.push(h('button', { class: 'btn btn-soft', onclick: (e) => setStatus(e.currentTarget, 'serving') }, icon('megaphone'), t('recall')));
     }
     if (order.status !== 'waiting') {
       actionButtons.push(
         h('button', { class: 'btn btn-ghost', onclick: (e) => setStatus(e.currentTarget, 'waiting') }, icon('undo'), t('return_to_queue')),
       );
     }
-    if (order.status === 'waiting' || order.status === 'serving') {
+    // «Қате билет»: аяқталғаны да есептен шығарылуы мүмкін
+    if (order.status !== 'cancelled') {
       actionButtons.push(
         h(
           'button',
@@ -334,6 +333,8 @@ export function showOrderModal(order, { mode = 'details', onChanged, actions = s
     h('div', { class: 'issued-label' }, t('queue_number')),
     h('div', { class: 'big-number' }, h('span', { class: 'hash' }, '№'), String(order.number)),
     !isIssued && statusChip(order.status),
+    // Кезектегі талон: әрекеттер QR-дан жоғары — «Қате билет» бірден көрінсін
+    actionButtons.length ? h('div', { class: 'order-actions' }, actionButtons) : null,
     localhostNotice(),
     h('div', { class: 'qr-box' }, qrSvg(url, { label: `QR №${order.number}` })),
     h('p', { class: 'muted small' }, t('scan_hint')),
@@ -363,7 +364,6 @@ export function showOrderModal(order, { mode = 'details', onChanged, actions = s
         t('copy_link'),
       ),
     ),
-    actionButtons.length ? h('div', { class: 'stack', style: { width: '100%', gap: '10px' } }, actionButtons) : null,
   );
 
   const modal = openModal({

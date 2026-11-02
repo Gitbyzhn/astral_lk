@@ -68,6 +68,18 @@ const MIGRATIONS = [
   INSERT OR IGNORE INTO settings (key, value) VALUES ('default_payment_method', '2');
   ALTER TABLE order_items ADD COLUMN payment_method_id INTEGER;
   `,
+  // 3: клиент телефонына хабарлама (Web Push) — талонға жазылған құрылғылар
+  `
+  CREATE TABLE push_subscriptions (
+    order_id   INTEGER NOT NULL,
+    endpoint   TEXT    NOT NULL,
+    lang       TEXT    NOT NULL DEFAULT 'kk',
+    next_sent  INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL,
+    PRIMARY KEY (order_id, endpoint)
+  );
+  CREATE INDEX idx_push_endpoint ON push_subscriptions (endpoint);
+  `,
 ];
 
 function migrate(db) {

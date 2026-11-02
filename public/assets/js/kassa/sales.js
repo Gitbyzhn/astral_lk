@@ -73,7 +73,7 @@ export function salesPage() {
   }
 
   function orderRow(order) {
-    const open = () => showOrderModal(order, { actions: false });
+    const open = () => showOrderModal(order, { onChanged: load });
     const pays = paymentTotals(order.items);
     return h(
       'div',
