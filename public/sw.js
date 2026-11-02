@@ -1,10 +1,11 @@
 /* Astral service worker: қосымша қабығын кэштейді (желі нашар болса да ашылады).
    Стратегия — алдымен желі, болмаса кэш. API сұраулары кэштелмейді (деректер әрқашан жаңа). */
-const VERSION = 'astral-v2';
+const VERSION = 'astral-v3';
 
 const SHELL = [
   '/',
   '/admin/',
+  '/kassa/',
   '/assets/css/app.css',
   '/assets/js/core/api.js',
   '/assets/js/core/dom.js',
@@ -36,8 +37,13 @@ const SHELL = [
   '/assets/js/admin/reports.js',
   '/assets/js/admin/chart.js',
   '/assets/js/admin/settings.js',
+  '/assets/js/kassa/main.js',
+  '/assets/js/kassa/login.js',
+  '/assets/js/kassa/sales.js',
   '/vendor/qrcode.mjs',
-  '/icons/logo.svg',
+  '/brand/mark.webp',
+  '/brand/logo.webp',
+  '/icons/favicon.png',
   '/icons/icon-192.png',
 ];
 
@@ -66,8 +72,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
 
   if (request.mode === 'navigate') {
-    // Барлық клиент беттері бір index.html — офлайн кезде сол қабық ашылады.
-    const shell = url.pathname.startsWith('/admin') ? '/admin/' : '/';
+    // Әр қосымшаның беттері бір index.html — офлайн кезде сол қабық ашылады.
+    const shell = url.pathname.startsWith('/admin') ? '/admin/' : url.pathname.startsWith('/kassa') ? '/kassa/' : '/';
     event.respondWith(
       fetch(request)
         .then((response) => {

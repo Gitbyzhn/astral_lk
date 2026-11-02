@@ -1,6 +1,7 @@
 // Есептер (Cloudflare D1) — server/services/reports.js логикасымен бірдей.
 import { badRequest } from '../server/errors.js';
 import { daysInMonth, isDay, isMonth, localParts, nextMonth } from './time.js';
+import { PAYMENT_REPORT_SQL, paymentBreakdown } from '../server/orderLines.js';
 
 function resolveRange(period, date, timeZone) {
   const now = localParts(timeZone);
@@ -47,7 +48,7 @@ export async function buildReport(ctx, period = 'day', date) {
   const valid = `${inRange} AND o.status != 'cancelled'`;
   const keyExpr = { hour: 'o.hour', day: 'o.day', month: 'substr(o.day, 1, 7)' }[range.group];
 
-  const [totals, cancelled, sold, active, series] = await db.batch([
+  const [totals, cancelled, sold, active, series, paid, methods] = await db.batch([
     db
       .prepare(`SELECT COUNT(*) AS orders, COALESCE(SUM(o.people), 0) AS people, COALESCE(SUM(o.total), 0) AS revenue FROM orders o WHERE ${valid}`)
       .bind(...bounds),
@@ -66,6 +67,9 @@ export async function buildReport(ctx, period = 'day', date) {
     db
       .prepare(`SELECT ${keyExpr} AS k, COUNT(*) AS orders, SUM(o.people) AS people, SUM(o.total) AS revenue FROM orders o WHERE ${valid} GROUP BY k ORDER BY k`)
       .bind(...bounds),
+    // Төлем түрлері бойынша: Наличка / Каспий / Банк
+    db.prepare(PAYMENT_REPORT_SQL(valid)).bind(...bounds),
+    db.prepare('SELECT id, name FROM payment_methods WHERE deleted = 0 ORDER BY id'),
   ]);
 
   const t = totals.results[0];
@@ -82,6 +86,7 @@ export async function buildReport(ctx, period = 'day', date) {
     group: range.group,
     totals: { ...t, avgCheck: t.orders ? Math.round(t.revenue / t.orders) : 0, cancelled: cancelled.results[0].n },
     byType: [...sold.results, ...unsold].map((r) => ({ ...r, deleted: r.deleted === 1 })),
+    byPayment: paymentBreakdown(paid.results, methods.results),
     series: fillSeries(range, series.results, ctx.tz),
   };
 }

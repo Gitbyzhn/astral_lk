@@ -1,6 +1,6 @@
 import { h, mount } from './dom.js';
 import { t } from './i18n.js';
-import { dateTime, money } from './format.js';
+import { dateTime, money, paymentTotals } from './format.js';
 import { qrSvg } from './qr.js';
 
 /* ------------------------------- Дыбыс ------------------------------- */
@@ -51,8 +51,21 @@ export function vibrate(pattern = [300, 120, 300, 120, 600]) {
 
 /* ---------------------------- Басып шығару ---------------------------- */
 
+/** Бір түр әртүрлі төлеммен бөлінсе де, талонда бір жол. */
+function mergedItems(items) {
+  const merged = new Map();
+  for (const item of items) {
+    const key = `${item.ticketTypeId ?? ''}|${item.name}|${item.price}`;
+    const row = merged.get(key);
+    if (row) row.qty += item.qty;
+    else merged.set(key, { ...item });
+  }
+  return [...merged.values()];
+}
+
 /** Талонды чек принтерге (58/80 мм) немесе қарапайым принтерге шығарады. */
 export function printTicket({ businessName, order, url }) {
+  const payments = paymentTotals(order.items).filter((p) => p.name);
   let area = document.getElementById('print-area');
   if (!area) {
     area = h('div', { id: 'print-area' });
@@ -70,7 +83,7 @@ export function printTicket({ businessName, order, url }) {
       h(
         'tbody',
         null,
-        order.items.map((item) =>
+        mergedItems(order.items).map((item) =>
           h('tr', null, h('td', null, `${item.name} ×${item.qty}`), h('td', { class: 'r' }, money(item.qty * item.price))),
         ),
         h(
@@ -79,6 +92,8 @@ export function printTicket({ businessName, order, url }) {
           h('td', null, `${t('total')} · ${t('people_count', { n: order.people })}`),
           h('td', { class: 'r' }, money(order.total)),
         ),
+        // Чек ретінде: қандай төлеммен қанша
+        payments.map((p) => h('tr', { class: 'p-pay' }, h('td', null, `${t('payment')}: ${p.name}`), h('td', { class: 'r' }, money(p.sum)))),
       ),
     ),
     h('div', { class: 'p-foot' }, dateTime(order.createdAt)),

@@ -8,6 +8,7 @@ import { createSettings } from './services/settings.js';
 import { createTicketTypes } from './services/ticketTypes.js';
 import { createOrders } from './services/orders.js';
 import { createReports } from './services/reports.js';
+import { createPaymentMethods } from './services/paymentMethods.js';
 import { buildManifest } from './manifest.js';
 
 const PUBLIC_DIR = path.join(ROOT_DIR, 'public');
@@ -60,7 +61,8 @@ export function createApp({ db, events, options = {} }) {
   const settings = createSettings(db, { timeZone: opts.timeZone, publicUrl: opts.publicUrl });
   const auth = createAuth({ settings, initialPassword: opts.initialPassword, sessionDays: opts.sessionDays });
   const types = createTicketTypes(db);
-  const orders = createOrders(db, { ttlHours: opts.queueTtlHours });
+  const payments = createPaymentMethods(db, settings);
+  const orders = createOrders(db, { ttlHours: opts.queueTtlHours, payments });
   const reports = createReports(db);
 
   if (!settings.get('seeded')) {
@@ -98,6 +100,27 @@ export function createApp({ db, events, options = {} }) {
   api.post('/auth/login', (req, res) => res.json(auth.login(req.body?.password, req.ip)));
   api.post('/auth/key', (req, res) => res.json(auth.loginWithKey(req.body?.key, req.ip)));
 
+  const createOrder = (req, res) => {
+    const order = orders.create(req.body?.items);
+    events.emit('queue');
+    res.status(201).json(order);
+  };
+
+  // Касса — әкімші де, кассир де (касса сілтемесі арқылы кірген) қолданады
+  const kassa = express.Router();
+  kassa.use(auth.requireStaff);
+  kassa.get('/session', (req, res) => res.json({ ok: true, role: req.role }));
+  kassa.get('/catalog', (_req, res) =>
+    res.json({ types: types.list(), paymentMethods: payments.list(), defaultPaymentMethodId: payments.defaultId() }),
+  );
+  kassa.post('/orders', createOrder);
+  // Кассирге бір күннің қорытындысы: қай билет қанша, қандай төлеммен, және сол күнгі талондар
+  kassa.get('/summary', (req, res) => {
+    const { date, totals, byType, byPayment } = reports.build('day', req.query.date ? String(req.query.date) : undefined);
+    res.json({ date, totals, byType, byPayment, orders: orders.dayOrders(date) });
+  });
+  api.use('/kassa', kassa);
+
   // Әкімші (диспетчер) бөлігі — токен міндетті
   const admin = express.Router();
   admin.use(auth.require);
@@ -133,11 +156,7 @@ export function createApp({ db, events, options = {} }) {
     res.json(list);
   });
 
-  admin.post('/orders', (req, res) => {
-    const order = orders.create(req.body?.items);
-    events.emit('queue');
-    res.status(201).json(order);
-  });
+  admin.post('/orders', createOrder); // ескі нұсқамен үйлесімділік (жаңасы — /kassa/orders)
   admin.get('/orders/:id', (req, res) => res.json(orders.get(req.params.id)));
   admin.patch('/orders/:id', (req, res) => {
     const order = orders.setStatus(req.params.id, req.body?.status);
@@ -158,10 +177,34 @@ export function createApp({ db, events, options = {} }) {
     res.json(reports.build(period, date));
   });
 
+  // Төлем түрлері (Наличка, Каспий, Банк…). Өзгерсе — касса беттері қайта жүктеледі ('types' хабары)
+  admin.get('/payment-methods', (_req, res) => res.json(payments.list()));
+  admin.post('/payment-methods', (req, res) => {
+    const method = payments.create(req.body);
+    events.emit('types');
+    res.status(201).json(method);
+  });
+  admin.patch('/payment-methods/:id', (req, res) => {
+    const method = payments.update(req.params.id, req.body);
+    events.emit('types');
+    res.json(method);
+  });
+  admin.delete('/payment-methods/:id', (req, res) => {
+    payments.remove(req.params.id);
+    events.emit('types');
+    res.status(204).end();
+  });
+
   admin.get('/settings', (_req, res) =>
-    res.json({ ...settings.publicInfo(), passwordIsDefault: auth.isDefault(), adminKey: auth.adminKey() }),
+    res.json({
+      ...settings.publicInfo(),
+      passwordIsDefault: auth.isDefault(),
+      adminKey: auth.adminKey(),
+      cashierKey: auth.cashierKey(),
+    }),
   );
   admin.post('/admin-key/rotate', (_req, res) => res.json(auth.rotateAdminKey()));
+  admin.post('/cashier-key/rotate', (_req, res) => res.json(auth.rotateCashierKey()));
   admin.patch('/settings', (req, res) => {
     const info = settings.update(req.body);
     events.emit('settings');
@@ -185,6 +228,7 @@ export function createApp({ db, events, options = {} }) {
       .send(JSON.stringify(buildManifest(kind, settings.publicInfo().businessName)));
   app.get('/manifest.webmanifest', sendManifest('client'));
   app.get('/admin/manifest.webmanifest', sendManifest('admin'));
+  app.get('/kassa/manifest.webmanifest', sendManifest('kassa'));
   // Cloudflare нұсқасына арналған файл — өз серверде қажет емес
   app.get('/_headers', (_req, res) => res.status(404).end());
   app.use(
@@ -192,14 +236,15 @@ export function createApp({ db, events, options = {} }) {
       index: false,
       redirect: false,
       setHeaders(res, filePath) {
-        const isIcon = filePath.includes(`${path.sep}icons${path.sep}`);
+        const isIcon = filePath.includes(`${path.sep}icons${path.sep}`) || filePath.includes(`${path.sep}brand${path.sep}`);
         res.setHeader('Cache-Control', isIcon ? 'public, max-age=604800' : 'no-cache');
       },
     }),
   );
   app.get('/admin{/*rest}', (_req, res) => sendPage(res, 'admin/index.html'));
+  app.get('/kassa{/*rest}', (_req, res) => sendPage(res, 'kassa/index.html'));
   app.get(['/', '/t/:code', '/board'], (_req, res) => sendPage(res, 'index.html'));
   app.use((_req, res) => sendPage(res.status(404), 'index.html'));
 
-  return { app, services: { settings, auth, types, orders, reports } };
+  return { app, services: { settings, auth, types, payments, orders, reports } };
 }

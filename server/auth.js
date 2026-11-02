@@ -68,8 +68,9 @@ function createLimiter({ max = 10, windowMs = 15 * 60_000 } = {}) {
 }
 
 /**
- * Әкімші кіруі: бір құпиясөз, HMAC қолтаңбалы токен.
- * Құпиясөз өзгерсе (password_version) — бұрынғы барлық токендер жарамсыз болады.
+ * Кіру: әкімші (құпиясөз немесе әкімші сілтемесі) және кассир (касса сілтемесі), HMAC қолтаңбалы токен.
+ * Әкімші құпиясөзі/сілтемесі өзгерсе (password_version) — әкімшінің бұрынғы токендері жарамсыз болады,
+ * касса сілтемесі жаңарса (cashier_version) — кассирлердің токендері.
  */
 export function createAuth({ settings, initialPassword, sessionDays }) {
   if (!settings.get('auth_secret')) settings.set('auth_secret', crypto.randomBytes(32).toString('base64url'));
@@ -81,34 +82,47 @@ export function createAuth({ settings, initialPassword, sessionDays }) {
 
   // Әкімші сілтемесі (/admin#key=…): аккаунтсыз, құпиясөзсіз кіру үшін
   if (!settings.get('admin_key')) settings.set('admin_key', generateAdminKey());
+  // Касса сілтемесі (/kassa#key=…): кассир тек билет береді және сатылымды көреді
+  if (!settings.get('cashier_key')) settings.set('cashier_key', generateAdminKey());
 
   const limiter = createLimiter();
   const secret = () => settings.get('auth_secret');
   const passwordVersion = () => Number(settings.get('password_version', '1'));
+  const cashierVersion = () => Number(settings.get('cashier_version', '1'));
   const isDefault = () => settings.get('password_is_default') === '1';
 
   const sign = (data) => crypto.createHmac('sha256', secret()).update(data).digest('base64url');
 
-  function issueToken() {
+  /** @param {'admin' | 'cashier'} role */
+  function issueToken(role = 'admin') {
     const expiresAt = Date.now() + sessionDays * 86_400_000;
-    const body = Buffer.from(JSON.stringify({ exp: expiresAt, pv: passwordVersion() })).toString('base64url');
-    return { token: `${body}.${sign(body)}`, expiresAt };
+    const payload = role === 'cashier' ? { exp: expiresAt, r: 'cashier', cv: cashierVersion() } : { exp: expiresAt, pv: passwordVersion() };
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    return { token: `${body}.${sign(body)}`, expiresAt, role };
   }
 
-  function verifyToken(token) {
-    if (typeof token !== 'string') return false;
+  /** Токеннің рөлі: 'admin' | 'cashier', жарамсыз болса — null. */
+  function tokenRole(token) {
+    if (typeof token !== 'string') return null;
     const [body, sig] = token.split('.');
-    if (!body || !sig) return false;
+    if (!body || !sig) return null;
     const expected = Buffer.from(sign(body));
     const given = Buffer.from(sig);
-    if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return false;
+    if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return null;
     try {
       const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-      return payload.exp > Date.now() && payload.pv === passwordVersion();
+      if (!(payload.exp > Date.now())) return null;
+      if (payload.r === 'cashier') return payload.cv === cashierVersion() ? 'cashier' : null;
+      return payload.pv === passwordVersion() ? 'admin' : null;
     } catch {
-      return false;
+      return null;
     }
   }
+
+  const bearer = (req) => {
+    const header = req.get('authorization') || '';
+    return header.startsWith('Bearer ') ? header.slice(7) : null;
+  };
 
   return {
     isDefault,
@@ -120,27 +134,40 @@ export function createAuth({ settings, initialPassword, sessionDays }) {
         throw new HttpError(401, 'wrong_password');
       }
       limiter.reset(ip);
-      return { ...issueToken(), passwordIsDefault: isDefault() };
+      return { ...issueToken('admin'), passwordIsDefault: isDefault() };
     },
 
-    /** Әкімші сілтемесі арқылы кіру. */
+    /** Сілтеме арқылы кіру: әкімші кілті → әкімші, касса кілті → кассир. */
     loginWithKey(key, ip) {
       limiter.check(ip);
-      if (typeof key !== 'string' || !key || !sameSecret(key, settings.get('admin_key'))) {
+      let role = null;
+      if (typeof key === 'string' && key) {
+        if (sameSecret(key, settings.get('admin_key'))) role = 'admin';
+        else if (sameSecret(key, settings.get('cashier_key'))) role = 'cashier';
+      }
+      if (!role) {
         limiter.fail(ip);
         throw new HttpError(401, 'invalid_admin_link');
       }
       limiter.reset(ip);
-      return { ...issueToken(), passwordIsDefault: isDefault() };
+      return role === 'admin' ? { ...issueToken('admin'), passwordIsDefault: isDefault() } : issueToken('cashier');
     },
 
     adminKey: () => settings.get('admin_key'),
+    cashierKey: () => settings.get('cashier_key'),
 
     /** Жаңа сілтеме: ескісі жұмыс істемей қалады, барлық құрылғылар шығарылады (осы құрылғыдан басқа). */
     rotateAdminKey() {
       settings.set('admin_key', generateAdminKey());
       settings.set('password_version', String(passwordVersion() + 1));
-      return { adminKey: settings.get('admin_key'), ...issueToken() };
+      return { adminKey: settings.get('admin_key'), ...issueToken('admin') };
+    },
+
+    /** Жаңа касса сілтемесі: ескісі өшеді, кассирлердің барлық құрылғылары шығарылады. */
+    rotateCashierKey() {
+      settings.set('cashier_key', generateAdminKey());
+      settings.set('cashier_version', String(cashierVersion() + 1));
+      return { cashierKey: settings.get('cashier_key') };
     },
 
     changePassword(current, next, ip) {
@@ -155,14 +182,23 @@ export function createAuth({ settings, initialPassword, sessionDays }) {
       settings.set('admin_password', hashPassword(next));
       settings.set('password_version', String(passwordVersion() + 1));
       settings.set('password_is_default', '0');
-      return { ...issueToken(), passwordIsDefault: false };
+      return { ...issueToken('admin'), passwordIsDefault: false };
     },
 
-    /** Express middleware: `Authorization: Bearer <token>` міндетті. */
+    /** Express middleware: тек әкімші (`Authorization: Bearer <token>`). Кассир токені → 403. */
     require(req, _res, next) {
-      const header = req.get('authorization') || '';
-      const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-      if (!verifyToken(token)) return next(new HttpError(401, 'unauthorized'));
+      const role = tokenRole(bearer(req));
+      if (!role) return next(new HttpError(401, 'unauthorized'));
+      if (role !== 'admin') return next(new HttpError(403, 'forbidden'));
+      req.role = role;
+      next();
+    },
+
+    /** Express middleware: әкімші немесе кассир (касса беттері). */
+    requireStaff(req, _res, next) {
+      const role = tokenRole(bearer(req));
+      if (!role) return next(new HttpError(401, 'unauthorized'));
+      req.role = role;
       next();
     },
   };

@@ -4,7 +4,7 @@ import { t } from '../core/i18n.js';
 import { api } from '../core/api.js';
 import { dateTime, todayKey } from '../core/format.js';
 import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from '../core/pwa.js';
-import { statusChip } from '../core/ui.js';
+import { brandHero, statusChip } from '../core/ui.js';
 import { env } from '../core/env.js';
 import { LOGO_URL } from '../core/logo.js';
 import { clientHeader } from './common.js';
@@ -81,6 +81,7 @@ export function homePage({ info }) {
     mount(
       el,
       clientHeader(info),
+      brandHero(info.businessName, null, { size: 200 }),
       savedCard(),
       h(
         'section',

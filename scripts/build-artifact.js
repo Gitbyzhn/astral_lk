@@ -1,7 +1,7 @@
 // Claude сілтемесі (artifact) нұсқасын бір HTML файлға жинау:  npm run build:artifact
 // Ортақ беттер (public/assets/js/...) өзгеріссіз алынады, тек деректер қабаты ауыстырылады:
 //   core/api.js → artifact/api.js (Claude деректер базасы), core/live.js, core/router.js (#hash),
-//   core/pwa.js, core/env.js.
+//   core/pwa.js, core/env.js, core/logo.js (логотиптер бетке data: URI ретінде салынады).
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,7 @@ import { renderDocument } from '../artifact/template.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CORE = path.join(ROOT, 'public', 'assets', 'js', 'core');
-const SWAPPED = new Set(['api.js', 'live.js', 'router.js', 'pwa.js', 'env.js']);
+const SWAPPED = new Set(['api.js', 'live.js', 'router.js', 'pwa.js', 'env.js', 'logo.js']);
 const QR_LIBRARY = path.join(ROOT, 'public', 'vendor', 'qrcode.mjs');
 
 const artifactSwap = {
@@ -37,6 +37,7 @@ const bundle = await esbuild.build({
   legalComments: 'none',
   write: false,
   banner: { js: '/* Astral — кезек жүйесі. QR: qrcode-generator (c) Kazuhiko Arase, MIT License */' },
+  loader: { '.webp': 'dataurl' },
   plugins: [artifactSwap],
 });
 const js = bundle.outputFiles[0].text;

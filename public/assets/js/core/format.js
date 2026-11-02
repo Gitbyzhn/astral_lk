@@ -83,5 +83,25 @@ export function ago(iso) {
   return time(iso);
 }
 
-/** Тапсырыстың қысқаша мазмұны: «Ересек ×3 · Балалар ×2» */
-export const itemsSummary = (items) => items.map((i) => `${i.name} ×${i.qty}`).join(' · ');
+/** Тапсырыстың қысқаша мазмұны: «Ересек ×3 · Балалар ×2» (бір түр әртүрлі төлеммен бөлінсе де — бір рет). */
+export function itemsSummary(items) {
+  const merged = new Map();
+  for (const item of items) merged.set(item.name, (merged.get(item.name) ?? 0) + item.qty);
+  return [...merged].map(([name, qty]) => `${name} ×${qty}`).join(' · ');
+}
+
+/**
+ * Төлем түрлері бойынша сомалар: [{ id, name, sum, qty }] (бірінші кездескен ретпен).
+ * Төлем түрі жоқ ескі жолдар id: null болып бір топқа түседі.
+ */
+export function paymentTotals(items) {
+  const totals = new Map();
+  for (const item of items) {
+    const id = item.paymentMethodId ?? null;
+    const row = totals.get(id) ?? { id, name: item.paymentName ?? null, sum: 0, qty: 0 };
+    row.sum += item.qty * item.price;
+    row.qty += item.qty;
+    totals.set(id, row);
+  }
+  return [...totals.values()];
+}

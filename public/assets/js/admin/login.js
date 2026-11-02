@@ -2,7 +2,7 @@ import { h } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { errorText, t } from '../core/i18n.js';
 import { api, auth } from '../core/api.js';
-import { brand, langToggle, withBusy } from '../core/ui.js';
+import { brandHero, langToggle, withBusy } from '../core/ui.js';
 import { store } from './shared.js';
 
 /** Әкімші кіру беті. */
@@ -56,7 +56,7 @@ export function loginView({ onSuccess, error: initialError = null }) {
     h(
       'div',
       { class: 'card auth-card' },
-      brand(store.info.businessName, t('admin_panel')),
+      brandHero(store.info.businessName),
       h('h1', null, t('login_title')),
       h('p', { class: 'lead' }, t('login_lead')),
       form,

@@ -688,6 +688,42 @@ input[type='month'].input {
   height: 36px;
   border-radius: 11px;
   flex: none;
+  object-fit: cover;
+  background: #0b0607;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+/* Үлкен логотип: кіру беттері, клиенттің басты беті */
+.brand-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-hero-img {
+  display: block;
+  max-width: 62vw;
+  aspect-ratio: 1;
+  height: auto;
+  border-radius: 28px;
+  object-fit: cover;
+  background: #0b0607;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 26px 60px -26px rgba(214, 38, 48, 0.6);
+}
+
+.brand-hero-sub {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.auth-card .brand-hero {
+  margin-bottom: 20px;
 }
 
 .brand-name {
@@ -1210,8 +1246,8 @@ input[type='month'].input {
   bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 10px);
   z-index: 25;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   padding: 10px 10px 10px 16px;
   border-radius: 20px;
   background: rgba(19, 32, 66, 0.92);
@@ -1220,6 +1256,16 @@ input[type='month'].input {
   border: 1px solid var(--line-2);
   box-shadow: var(--shadow-2);
   animation: slide-up 0.25s var(--ease);
+}
+
+.cartbar-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cartbar-pay {
+  margin-left: -6px;
 }
 
 .cartbar .info {
@@ -1259,6 +1305,17 @@ input[type='month'].input {
   from {
     opacity: 0;
     transform: translateY(16px);
+  }
+}
+
+/* Телефонда төменгі жолақ (төлем түрі + «Кезек беру») соңғы карточкаларды жаппауы үшін */
+.cartbar-spacer {
+  height: 120px;
+}
+
+@media (min-width: 1100px) {
+  .cartbar-spacer {
+    display: none;
   }
 }
 
@@ -2775,5 +2832,256 @@ input[type='month'].input {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Төлем түрлері: кассадағы таңдау, тегтер, есептегі бөліну
+   --------------------------------------------------------------------- */
+.pay-seg {
+  display: flex;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.pay-seg::-webkit-scrollbar {
+  display: none;
+}
+
+.pay-seg button {
+  flex: 1 0 auto;
+  padding: 6px 14px;
+  white-space: nowrap;
+}
+
+.pay-seg.sm button {
+  min-height: 34px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.pay-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pay-picker.compact {
+  flex-direction: row;
+  align-items: center;
+}
+
+.pay-picker.compact .pay-seg {
+  flex: 1;
+  min-width: 0;
+}
+
+.pay-picker.compact .pay-seg button {
+  padding: 6px 8px;
+  font-size: 13.5px;
+}
+
+.pay-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: rgba(130, 160, 255, 0.08);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+.qmeta .pay-tag {
+  margin-left: 0;
+}
+
+.pay-split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.pay-split b {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.items-list .pay-split {
+  justify-content: flex-end;
+}
+
+/* «Әр билетке бөлек» терезесі */
+.split {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.split-all {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.split-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.split-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.split-type .faint {
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.split-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.split-n {
+  flex: none;
+  width: 22px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.split-row .pay-seg {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Есептегі бөліну: жіңішке бөлікті жолақ + әр түрдің сомасы */
+.pay-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.seg-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.seg-bar span {
+  flex-basis: 0;
+  min-width: 3px;
+  background: var(--dot);
+}
+
+.pay-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.pay-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.pay-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.pay-row:last-child {
+  padding-bottom: 0;
+}
+
+.pay-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-weight: 650;
+}
+
+.pay-name small {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.pay-meta {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.pay-sum {
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.pay-row.zero .pay-sum {
+  color: var(--text-3);
+  font-weight: 600;
+}
+
+/* Баптаулардағы төлем түрлері тізімі */
+.pay-list {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.pay-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px 8px 6px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.pay-item:first-child {
+  border-top: 0;
+}
+
+.pay-item-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+/* Касса сатылымы: үш карточка (телефонда — түсім үстінде, қалған екеуі қатар) */
+@media (max-width: 899px) {
+  .kpis-3 > .kpi:last-child {
+    grid-column: auto;
+  }
+}
+
+@media (min-width: 900px) {
+  .kpis.kpis-3 {
+    grid-template-columns: 1.4fr repeat(2, 1fr);
   }
 }

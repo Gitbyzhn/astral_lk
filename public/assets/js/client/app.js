@@ -10,7 +10,7 @@ import { homePage } from './home.js';
 import { ticketPage } from './ticket.js';
 import { boardPage } from './board.js';
 
-const info = { businessName: 'Astral', timeZone: 'Asia/Almaty' };
+const info = { businessName: 'Astral Labyrinth', timeZone: 'Asia/Almaty' };
 
 function notFoundPage() {
   return {

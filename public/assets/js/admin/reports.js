@@ -4,25 +4,13 @@ import { errorText, t } from '../core/i18n.js';
 import { api } from '../core/api.js';
 import { dayLabel, money, monthLabel, num, todayKey } from '../core/format.js';
 import { emptyState, spinner, toast } from '../core/ui.js';
-import { pageHead } from './shared.js';
+import { dateNav, pageHead, paymentBreakdown, paymentLabel, typesTable } from './shared.js';
 import { columnChart } from './chart.js';
 
 // Сүзгі күйі беттер арасында ауысқанда сақталады.
 const state = { period: 'day', day: null, month: null, view: 'chart' };
 
-const shiftDay = (day, delta) => {
-  const d = new Date(`${day}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
-};
-
-const shiftMonth = (month, delta) => {
-  const [y, m] = month.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
-  return d.toISOString().slice(0, 7);
-};
-
-/** Есеп: күндік / айлық / жалпы. Карточкалар, түсім графигі және билет түрлері бойынша кесте. */
+/** Есеп: күндік / айлық / жалпы. Карточкалар, төлем түрлері, түсім графигі және билет түрлері бойынша кесте. */
 export function reportsPage() {
   const today = todayKey();
   state.day ??= today;
@@ -76,51 +64,17 @@ export function reportsPage() {
     let nav = null;
     if (state.period !== 'all') {
       const isDay = state.period === 'day';
-      const value = isDay ? state.day : state.month;
-      const max = isDay ? today : today.slice(0, 7);
-      const picker = h('input', {
+      nav = dateNav({
         type: isDay ? 'date' : 'month',
-        value,
-        max,
-        tabindex: '-1',
-        'aria-hidden': 'true',
-        onchange: (e) => {
-          const v = e.target.value;
-          if (!v) return;
-          if (isDay) state.day = v > today ? today : v;
-          else state.month = v > max ? max : v;
+        value: isDay ? state.day : state.month,
+        max: isDay ? today : today.slice(0, 7),
+        onChange: (value) => {
+          if (isDay) state.day = value;
+          else state.month = value;
           renderFilters();
           load();
         },
       });
-      const step = (delta) => {
-        if (isDay) state.day = shiftDay(state.day, delta);
-        else state.month = shiftMonth(state.month, delta);
-        renderFilters();
-        load();
-      };
-      nav = h(
-        'div',
-        { class: 'datenav' },
-        h('button', { class: 'btn btn-ghost btn-icon btn-sm', 'aria-label': '‹', onclick: () => step(-1) }, icon('chevronLeft')),
-        h(
-          'label',
-          {
-            onclick: (e) => {
-              e.preventDefault();
-              try {
-                picker.showPicker();
-              } catch {
-                picker.focus();
-              }
-            },
-          },
-          icon('calendar', 'icon icon-sm'),
-          h('span', null, isDay ? dayLabel(state.day) : monthLabel(state.month)),
-          picker,
-        ),
-        h('button', { class: 'btn btn-ghost btn-icon btn-sm', 'aria-label': '›', disabled: value >= max, onclick: () => step(1) }, icon('chevronRight')),
-      );
     }
 
     const todayBtn =
@@ -265,8 +219,12 @@ export function reportsPage() {
     const rows = [[t('col_type'), t('col_qty'), t('col_sum')]];
     for (const row of report.byType) rows.push([row.name, row.qty, row.revenue]);
     rows.push([t('total'), report.totals.people, report.totals.revenue]);
+    if (report.byPayment?.length) {
+      rows.push([], [t('payment_type'), t('col_qty'), t('col_sum')]);
+      for (const row of report.byPayment) rows.push([paymentLabel(row.name), row.qty, row.revenue]);
+    }
     const csv = rows.map((r) => r.map((v) => `"${String(v).replaceAll('"', '""')}"`).join(';')).join('\r\n');
-    const blob = new Blob(['﻿', csv], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' });
     const a = h('a', { href: URL.createObjectURL(blob), download: `astral-${report.period}-${report.date ?? 'all'}.csv` });
     document.body.append(a);
     a.click();
@@ -275,7 +233,6 @@ export function reportsPage() {
   }
 
   function typesCard() {
-    const total = report.totals.revenue;
     const rows = report.byType;
     return h(
       'section',
@@ -286,72 +243,24 @@ export function reportsPage() {
         h('div', { style: { flex: '1' } }, h('h2', null, t('by_types')), h('div', { class: 'sub' }, periodLabel())),
         rows.length > 0 && h('button', { class: 'btn btn-ghost btn-sm', onclick: exportCsv }, icon('download', 'icon icon-sm'), t('export_csv')),
       ),
-      rows.length
-        ? h(
-            'div',
-            { class: 'table-wrap', style: { padding: '8px 0 6px' } },
-            h(
-              'table',
-              { class: 'table' },
-              h(
-                'thead',
-                null,
-                h('tr', null, h('th', null, t('col_type')), h('th', { class: 'r' }, t('col_qty')), h('th', { class: 'r' }, t('col_sum')), h('th', { class: 'hide-sm' }, t('col_share'))),
-              ),
-              h(
-                'tbody',
-                null,
-                rows.map((row) => {
-                  const share = total ? (row.revenue / total) * 100 : 0;
-                  return h(
-                    'tr',
-                    null,
-                    h(
-                      'td',
-                      null,
-                      h(
-                        'div',
-                        { class: 't-name' },
-                        h('span', { class: 'dot', style: { '--dot': row.color == null ? 'var(--text-3)' : `var(--c${row.color})` } }),
-                        h('span', null, row.name, row.deleted && h('small', null, ` · ${t('deleted_type')}`)),
-                      ),
-                    ),
-                    h('td', { class: 'r' }, num(row.qty)),
-                    h('td', { class: 'r' }, money(row.revenue)),
-                    h(
-                      'td',
-                      { class: 'hide-sm' },
-                      h(
-                        'div',
-                        { class: 'share' },
-                        h('div', { class: 'share-track' }, h('div', { class: 'share-fill', style: { width: `${share}%` } })),
-                        h('span', null, `${Math.round(share)}%`),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-              h(
-                'tfoot',
-                null,
-                h(
-                  'tr',
-                  null,
-                  h('td', null, t('total')),
-                  h('td', { class: 'r' }, num(report.totals.people)),
-                  h('td', { class: 'r' }, money(total)),
-                  h('td', { class: 'hide-sm' }),
-                ),
-              ),
-            ),
-          )
-        : h('div', { class: 'card-body' }, emptyState({ iconName: 'tag', title: t('no_data') })),
+      rows.length ? typesTable(rows, report.totals) : h('div', { class: 'card-body' }, emptyState({ iconName: 'tag', title: t('no_data') })),
+    );
+  }
+
+  /* ------------------------- Төлем түрлері бойынша ------------------------- */
+  function paymentsCard() {
+    if (!report.byPayment?.length) return null;
+    return h(
+      'section',
+      { class: 'card' },
+      h('div', { class: 'card-head' }, icon('wallet'), h('div', { style: { flex: '1' } }, h('h2', null, t('by_payment')), h('div', { class: 'sub' }, periodLabel()))),
+      h('div', { class: 'card-body' }, paymentBreakdown(report.byPayment, report.totals.revenue)),
     );
   }
 
   function renderContent() {
     if (!report) return;
-    mount(content, kpis(), h('div', { class: 'report-grid' }, typesCard(), chartCard()));
+    mount(content, kpis(), h('div', { class: 'report-grid' }, h('div', { class: 'stack' }, paymentsCard(), typesCard()), chartCard()));
   }
 
   renderFilters();

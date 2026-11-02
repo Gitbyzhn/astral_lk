@@ -1,5 +1,6 @@
 import { badRequest } from '../errors.js';
 import { daysInMonth, isDay, isMonth, localParts, nextMonth } from '../time.js';
+import { PAYMENT_REPORT_SQL, paymentBreakdown } from '../orderLines.js';
 
 /** Кезең → күндер аралығы және графиктің топтау қадамы. */
 function resolveRange(period, date) {
@@ -87,6 +88,10 @@ export function createReports(db) {
         .filter((t) => !soldIds.has(t.id))
         .map((t) => ({ ...t, deleted: 0, qty: 0, revenue: 0, orders: 0 }));
 
+      // Төлем түрлері бойынша: Наличка / Каспий / Банк — кассадағы ақшаны тексеру үшін
+      const paid = db.prepare(PAYMENT_REPORT_SQL(valid)).all(params);
+      const methods = db.prepare('SELECT id, name FROM payment_methods WHERE deleted = 0 ORDER BY id').all();
+
       const keyExpr = { hour: 'o.hour', day: 'o.day', month: 'substr(o.day, 1, 7)' }[range.group];
       const seriesRows = db
         .prepare(
@@ -107,6 +112,7 @@ export function createReports(db) {
           cancelled,
         },
         byType: [...sold, ...unsold].map((r) => ({ ...r, deleted: r.deleted === 1 })),
+        byPayment: paymentBreakdown(paid, methods),
         series: fillSeries(range, seriesRows),
       };
     },

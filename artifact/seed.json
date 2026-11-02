@@ -6,5 +6,5 @@
       "vipz": { "name": "VIP", "price": 5000, "description": "Жеке қызмет көрсету", "color": 2, "active": true, "sort": 2, "deleted": false }
     }
   },
-  "meta/settings": { "businessName": "Astral", "timeZone": "Asia/Almaty" }
+  "meta/settings": { "businessName": "Astral Labyrinth", "timeZone": "Asia/Almaty" }
 }

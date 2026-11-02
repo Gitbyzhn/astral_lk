@@ -1,16 +1,15 @@
 // Тапсырыстар мен кезек (Cloudflare D1) — server/services/orders.js логикасымен бірдей.
 // D1-де интерактивті транзакция жоқ, сондықтан әр әрекет бір batch (атомарлы) ретінде жазылады.
 import { badRequest, notFound } from '../server/errors.js';
+import { effectiveDefault, normalizeItems, publicItems, toItem } from '../server/orderLines.js';
 import { localParts, nowIso } from './time.js';
 import { randomString } from './http.js';
 import { bump } from './data.js';
 
 const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
-const MAX_QTY = 999;
 const STATUSES = ['waiting', 'serving', 'done', 'cancelled'];
 const TTL_MS = 12 * 3_600_000;
 
-const toItem = (row) => ({ ticketTypeId: row.ticket_type_id, name: row.name, price: row.price, qty: row.qty, color: row.color ?? null });
 const toOrder = (row, items = []) => ({
   id: row.id,
   code: row.code,
@@ -25,7 +24,10 @@ const toOrder = (row, items = []) => ({
   items,
 });
 
-const ITEMS_SQL = `SELECT i.*, t.color AS color FROM order_items i LEFT JOIN ticket_types t ON t.id = i.ticket_type_id`;
+const ITEMS_SQL = `SELECT i.*, t.color AS color, p.name AS payment_name
+  FROM order_items i
+  LEFT JOIN ticket_types t ON t.id = i.ticket_type_id
+  LEFT JOIN payment_methods p ON p.id = i.payment_method_id`;
 
 function attach(rows, items) {
   const grouped = new Map(rows.map((r) => [r.id, []]));
@@ -61,29 +63,22 @@ async function expireStale(db) {
 /* ------------------------------------ Жасау ------------------------------------ */
 export async function createOrder(ctx, items) {
   const { db } = ctx;
-  if (!Array.isArray(items) || items.length === 0 || items.length > 100) throw badRequest('empty_order');
-  const merged = new Map();
-  for (const item of items) {
-    const id = Number(item?.ticketTypeId);
-    const qty = Number(item?.qty);
-    if (!Number.isInteger(id) || id <= 0) throw badRequest('invalid_ticket_type');
-    if (!Number.isInteger(qty) || qty < 0 || qty > MAX_QTY) throw badRequest('invalid_qty');
-    if (qty > 0) merged.set(id, (merged.get(id) ?? 0) + qty);
-  }
-  if (merged.size === 0) throw badRequest('empty_order');
-
-  const { results: types } = await db
-    .prepare('SELECT id, name, price FROM ticket_types WHERE deleted = 0 AND active = 1 AND id IN (SELECT value FROM json_each(?))')
-    .bind(JSON.stringify([...merged.keys()]))
-    .all();
-  const byId = new Map(types.map((t) => [t.id, t]));
-  const lines = [...merged].map(([id, qty]) => {
-    const type = byId.get(id);
-    if (!type) throw badRequest('invalid_ticket_type', { ticketTypeId: id });
-    return { id, name: type.name, price: type.price, qty };
+  // Бір сұраумен: белсенді билет түрлері, төлем түрлері және әдепкі төлем түрі
+  const [typesRes, methodsRes, savedRes] = await db.batch([
+    db.prepare('SELECT id, name, price FROM ticket_types WHERE deleted = 0 AND active = 1'),
+    db.prepare('SELECT id, name FROM payment_methods WHERE deleted = 0 ORDER BY id'),
+    db.prepare("SELECT value FROM settings WHERE key = 'default_payment_method'"),
+  ]);
+  const methods = methodsRes.results;
+  const activeMethods = new Set(methods.map((m) => m.id));
+  const byId = new Map(typesRes.results.map((t) => [t.id, t]));
+  const lines = normalizeItems(items, { defaultPayment: effectiveDefault(methods, savedRes.results[0]?.value) }).map((line) => {
+    const type = byId.get(line.typeId);
+    if (!type) throw badRequest('invalid_ticket_type', { ticketTypeId: line.typeId });
+    if (line.paymentMethodId !== null && !activeMethods.has(line.paymentMethodId)) throw badRequest('invalid_payment_method');
+    return { id: type.id, name: type.name, price: type.price, qty: line.qty, payment: line.paymentMethodId };
   });
   const people = lines.reduce((s, l) => s + l.qty, 0);
-  if (people > MAX_QTY) throw badRequest('invalid_qty');
   const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
 
   const now = new Date();
@@ -101,8 +96,11 @@ export async function createOrder(ctx, items) {
           .bind(code, day, day, hour, people, total, now.toISOString()),
         ...lines.map((l) =>
           db
-            .prepare('INSERT INTO order_items (order_id, ticket_type_id, name, price, qty) VALUES ((SELECT id FROM orders WHERE code = ?), ?, ?, ?, ?)')
-            .bind(code, l.id, l.name, l.price, l.qty),
+            .prepare(
+              `INSERT INTO order_items (order_id, ticket_type_id, name, price, qty, payment_method_id)
+               VALUES ((SELECT id FROM orders WHERE code = ?), ?, ?, ?, ?, ?)`,
+            )
+            .bind(code, l.id, l.name, l.price, l.qty, l.payment),
         ),
         bump(db, 'queue'),
       ]);
@@ -191,6 +189,12 @@ export async function queueState(ctx) {
   };
 }
 
+/** Кассаға: бір күннің тапсырыстары (ең жаңасы бірінші) — QR-ды қайта көрсету үшін. */
+export async function dayOrders(db, day) {
+  const { results } = await db.prepare('SELECT * FROM orders WHERE day = ? ORDER BY id DESC LIMIT 100').bind(day).all();
+  return hydrate(db, results);
+}
+
 /** Клиентке: тек өз талоны және кезектегі орны. */
 export async function publicView(ctx, code) {
   const { db } = ctx;
@@ -204,10 +208,10 @@ export async function publicView(ctx, code) {
     db.prepare("SELECT number FROM orders WHERE status = 'serving' ORDER BY called_at, id"),
     db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'waiting'"),
   ]);
-  const { id: _id, ...order } = toOrder(row, items.results.map(toItem));
+  const { id: _id, items: lines, ...order } = toOrder(row, items.results.map(toItem));
   const before = row.status === 'waiting' ? ahead.results[0] : { n: 0, people: 0 };
   return {
-    order,
+    order: { ...order, items: publicItems(lines) },
     queue: {
       ahead: before.n,
       aheadPeople: before.people,

@@ -1,6 +1,6 @@
 import { badRequest } from '../errors.js';
 
-export const DEFAULT_BUSINESS_NAME = 'Astral';
+export const DEFAULT_BUSINESS_NAME = 'Astral Labyrinth';
 
 /** Кілт-мән түріндегі қарапайым баптаулар қоймасы. */
 export function createSettings(db, { timeZone = 'Asia/Almaty', publicUrl = null } = {}) {

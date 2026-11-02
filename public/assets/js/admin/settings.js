@@ -5,12 +5,14 @@ import { api, auth } from '../core/api.js';
 import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from '../core/pwa.js';
 import { confirmDialog, copyText, langToggle, openModal, toast, withBusy } from '../core/ui.js';
 import { qrSvg } from '../core/qr.js';
-import { pageHead, store } from './shared.js';
+import { pageHead, paymentColor, store } from './shared.js';
 import { env } from '../core/env.js';
 
-/** Баптаулар: мекеме атауы, құпиясөз, табло/клиент беті, қосымшаны орнату, тіл. */
+/** Баптаулар: мекеме атауы, төлем түрлері, әкімші/касса сілтемелері, құпиясөз, экрандар, тіл. */
 export function settingsPage({ onLogout, refreshShell }) {
   const el = h('div', { class: 'page' });
+  // Екі сілтеме картасына бір сұрау
+  const secrets = env.artifact ? Promise.resolve(null) : api('/admin/settings').catch(() => null);
 
   function businessCard() {
     const input = h('input', { class: 'input', maxlength: '60', value: store.info.businessName, required: true });
@@ -54,47 +56,43 @@ export function settingsPage({ onLogout, refreshShell }) {
     );
   }
 
-  /** Әкімші сілтемесі: аккаунтсыз, құпиясөзсіз кіру (қызметкерлердің құрылғылары үшін). */
-  function adminLinkCard() {
+  /**
+   * Кіру сілтемесі — аккаунтсыз, құпиясөзсіз:
+   *   'admin' — әкімші беті (/admin#key=…), 'kassa' — кассирге, тек билет беру мен сатылым (/kassa#key=…).
+   * @param {'admin' | 'kassa'} kind
+   */
+  function linkCard(kind) {
+    const isKassa = kind === 'kassa';
+    const text = isKassa
+      ? { title: t('kassa_link'), lead: t('kassa_link_lead'), qrHint: t('kassa_link_qr_hint'), confirm: t('kassa_link_new_confirm'), done: t('kassa_link_new_done') }
+      : { title: t('admin_link'), lead: t('admin_link_lead'), qrHint: t('admin_link_qr_hint'), confirm: t('admin_link_new_confirm'), done: t('admin_link_new_done') };
     const localhost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
     const base = store.info.publicUrl || (localhost && store.lanUrls[0]) || location.origin;
-    const linkFor = (key) => `${base}/admin#key=${key}`;
+    const linkFor = (key) => `${base}/${isKassa ? 'kassa' : 'admin'}#key=${key}`;
     let key = null;
-    const input = h('input', { class: 'input', readonly: true, value: '…', 'aria-label': t('admin_link'), onfocus: (e) => e.target.select() });
+    const input = h('input', { class: 'input', readonly: true, value: '…', 'aria-label': text.title, onfocus: (e) => e.target.select() });
     const setKey = (value) => {
       key = value;
-      input.value = linkFor(value);
+      input.value = value ? linkFor(value) : '';
     };
-    api('/admin/settings')
-      .then((s) => setKey(s.adminKey))
-      .catch(() => {});
+    secrets.then((s) => s && setKey(isKassa ? s.cashierKey : s.adminKey));
 
     const showQr = () =>
       key &&
       openModal({
-        title: t('admin_link_qr'),
-        body: h(
-          'div',
-          { class: 'issued' },
-          h('div', { class: 'qr-box' }, qrSvg(linkFor(key), { label: t('admin_link') })),
-          h('p', { class: 'muted small' }, t('admin_link_qr_hint')),
-        ),
+        title: text.title,
+        body: h('div', { class: 'issued' }, h('div', { class: 'qr-box' }, qrSvg(linkFor(key), { label: text.title })), h('p', { class: 'muted small' }, text.qrHint)),
       });
 
     const rotate = async (button) => {
-      const ok = await confirmDialog({
-        title: t('admin_link_new'),
-        message: t('admin_link_new_confirm'),
-        confirmText: t('admin_link_new'),
-        danger: true,
-      });
+      const ok = await confirmDialog({ title: t('admin_link_new'), message: text.confirm, confirmText: t('admin_link_new'), danger: true });
       if (!ok) return;
       await withBusy(button, async () => {
         try {
-          const result = await api('/admin/admin-key/rotate', { method: 'POST' });
-          auth.token = result.token; // осы құрылғы кірген күйде қалады
-          setKey(result.adminKey);
-          toast(t('admin_link_new_done'));
+          const result = await api(isKassa ? '/admin/cashier-key/rotate' : '/admin/admin-key/rotate', { method: 'POST' });
+          if (!isKassa) auth.token = result.token; // осы құрылғы кірген күйде қалады
+          setKey(isKassa ? result.cashierKey : result.adminKey);
+          toast(text.done);
         } catch (err) {
           toast(errorText(err), 'error');
         }
@@ -104,11 +102,11 @@ export function settingsPage({ onLogout, refreshShell }) {
     return h(
       'section',
       { class: 'card' },
-      h('div', { class: 'card-head' }, icon('key'), h('h2', null, t('admin_link'))),
+      h('div', { class: 'card-head' }, icon(isKassa ? 'ticket' : 'key'), h('h2', null, text.title)),
       h(
         'div',
         { class: 'card-body form-grid' },
-        h('p', { class: 'muted small' }, t('admin_link_lead')),
+        h('p', { class: 'muted small' }, text.lead),
         input,
         h(
           'div',
@@ -127,6 +125,117 @@ export function settingsPage({ onLogout, refreshShell }) {
           ),
           h('button', { class: 'btn btn-soft', type: 'button', onclick: showQr }, icon('qr'), t('admin_link_qr')),
           h('button', { class: 'btn btn-ghost', type: 'button', onclick: (e) => rotate(e.currentTarget) }, icon('refresh'), t('admin_link_new')),
+        ),
+      ),
+    );
+  }
+
+  /** Төлем түрлері: Наличка, Каспий, Банк… — қосу, атын өзгерту, әдепкі ету, жою. */
+  function paymentsCard() {
+    const list = h('div', { class: 'list pay-list' });
+    const input = h('input', { class: 'input', maxlength: '40', placeholder: t('payment_name_ph'), 'aria-label': t('payment_name_ph') });
+    const addBtn = h('button', { class: 'btn btn-soft', type: 'submit' }, icon('plus'), t('add_payment'));
+    let methods = [];
+
+    async function load() {
+      try {
+        methods = await api('/admin/payment-methods');
+        draw();
+      } catch (err) {
+        if (err.status !== 401) toast(errorText(err), 'error');
+      }
+    }
+
+    async function change(button, fn) {
+      await withBusy(button, async () => {
+        try {
+          await fn();
+          await load();
+        } catch (err) {
+          toast(errorText(err), 'error');
+        }
+      });
+    }
+
+    function rename(method) {
+      const field = h('input', { class: 'input', maxlength: '40', value: method.name, required: true, autofocus: true, 'aria-label': t('name') });
+      const error = h('p', { class: 'error-text', hidden: true });
+      const submit = h('button', { class: 'btn btn-primary', type: 'submit' }, icon('check'), t('save'));
+      const form = h(
+        'form',
+        {
+          class: 'form-grid',
+          onsubmit: async (e) => {
+            e.preventDefault();
+            await withBusy(submit, async () => {
+              try {
+                await api(`/admin/payment-methods/${method.id}`, { method: 'PATCH', body: { name: field.value } });
+                modal.close();
+                toast(t('saved'));
+                load();
+              } catch (err) {
+                error.textContent = errorText(err);
+                error.hidden = false;
+              }
+            });
+          },
+        },
+        h('label', { class: 'field' }, h('span', { class: 'label' }, t('name')), field),
+        error,
+        h('div', { class: 'row', style: { justifyContent: 'flex-end' } }, h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => modal.close() }, t('cancel')), submit),
+      );
+      const modal = openModal({ title: t('rename'), body: form });
+    }
+
+    async function remove(method, button) {
+      const ok = await confirmDialog({ title: t('delete'), message: t('delete_payment_confirm', { name: method.name }), confirmText: t('delete'), danger: true });
+      if (ok) await change(button, () => api(`/admin/payment-methods/${method.id}`, { method: 'DELETE' }));
+    }
+
+    function draw() {
+      mount(
+        list,
+        methods.map((method) =>
+          h(
+            'div',
+            { class: 'pay-item' },
+            h('span', { class: 'dot', style: { '--dot': paymentColor(method.id) } }),
+            h('span', { class: 'pay-item-name' }, method.name),
+            method.isDefault
+              ? h('span', { class: 'chip chip-waiting' }, t('default_payment'))
+              : h('button', { class: 'btn btn-ghost btn-sm', onclick: (e) => change(e.currentTarget, () => api(`/admin/payment-methods/${method.id}`, { method: 'PATCH', body: { isDefault: true } })) }, t('make_default')),
+            h('button', { class: 'btn btn-ghost btn-icon btn-sm', 'aria-label': `${t('rename')}: ${method.name}`, onclick: () => rename(method) }, icon('edit')),
+            h('button', { class: 'btn btn-ghost btn-icon btn-sm', 'aria-label': `${t('delete')}: ${method.name}`, onclick: (e) => remove(method, e.currentTarget) }, icon('trash')),
+          ),
+        ),
+      );
+    }
+
+    load();
+    return h(
+      'section',
+      { class: 'card' },
+      h('div', { class: 'card-head' }, icon('wallet'), h('h2', null, t('payment_methods'))),
+      h(
+        'div',
+        { class: 'card-body form-grid' },
+        h('p', { class: 'muted small' }, t('payment_methods_lead')),
+        list,
+        h(
+          'form',
+          {
+            class: 'row',
+            onsubmit: async (e) => {
+              e.preventDefault();
+              if (!input.value.trim()) return input.focus();
+              await change(addBtn, async () => {
+                await api('/admin/payment-methods', { method: 'POST', body: { name: input.value } });
+                input.value = '';
+              });
+            },
+          },
+          h('div', { style: { flex: '1', minWidth: '0' } }, input),
+          addBtn,
         ),
       ),
     );
@@ -248,9 +357,9 @@ export function settingsPage({ onLogout, refreshShell }) {
     h(
       'div',
       { class: 'report-grid' },
-      h('div', { class: 'stack' }, businessCard(), screensCard()),
-      // Claude сілтемесінде кіру Claude аккаунты арқылы — құпиясөз керек емес
-      h('div', { class: 'stack' }, !env.artifact && adminLinkCard(), !env.artifact && passwordCard(), accountCard()),
+      h('div', { class: 'stack' }, businessCard(), !env.artifact && paymentsCard(), screensCard()),
+      // Claude сілтемесінде кіру Claude аккаунты арқылы — құпиясөз де, сілтемелер де керек емес
+      h('div', { class: 'stack' }, !env.artifact && linkCard('kassa'), !env.artifact && linkCard('admin'), !env.artifact && passwordCard(), accountCard()),
     ),
   );
 

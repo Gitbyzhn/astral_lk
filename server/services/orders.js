@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
 import { badRequest, notFound } from '../errors.js';
 import { localParts, nowIso, today } from '../time.js';
+import { normalizeItems, publicItems, toItem } from '../orderLines.js';
 
 /** QR сілтемесіндегі код: шатастыратын таңбаларсыз (0/o, 1/l/i жоқ). */
 const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 const CODE_LENGTH = 10;
-const MAX_QTY = 999;
 export const STATUSES = ['waiting', 'serving', 'done', 'cancelled'];
 
 function randomCode() {
@@ -34,19 +34,14 @@ const toOrder = (row, items = []) => ({
   items,
 });
 
-const toItem = (row) => ({
-  ticketTypeId: row.ticket_type_id,
-  name: row.name,
-  price: row.price,
-  qty: row.qty,
-  color: row.color ?? null,
-});
-
 /**
  * Тапсырыс (order) = бір кезек нөмірі + бір QR. Ішінде бірнеше билет түрі әртүрлі санмен болуы мүмкін:
  * мысалы 5 адамдық топ — 3 «Ересек» + 2 «Балалар», бәріне бір кезек.
+ * Әр билет жолының өз төлем түрі бар (Наличка / Каспий / Банк), көрсетілмесе — әдепкісі.
+ * @param {import('better-sqlite3').Database} db
+ * @param {{ ttlHours?: number, payments: ReturnType<typeof import('./paymentMethods.js').createPaymentMethods> }} options
  */
-export function createOrders(db, { ttlHours = 12 } = {}) {
+export function createOrders(db, { ttlHours = 12, payments }) {
   const activeType = db.prepare('SELECT id, name, price FROM ticket_types WHERE id = ? AND deleted = 0 AND active = 1');
   const nextNumber = db.prepare('SELECT COALESCE(MAX(number), 0) + 1 AS n FROM orders WHERE day = ?');
   const codeExists = db.prepare('SELECT 1 FROM orders WHERE code = ?');
@@ -55,14 +50,16 @@ export function createOrders(db, { ttlHours = 12 } = {}) {
     VALUES (@code, @number, @day, @hour, @people, @total, @created_at)
   `);
   const insertItem = db.prepare(`
-    INSERT INTO order_items (order_id, ticket_type_id, name, price, qty)
-    VALUES (@order_id, @ticket_type_id, @name, @price, @qty)
+    INSERT INTO order_items (order_id, ticket_type_id, name, price, qty, payment_method_id)
+    VALUES (@order_id, @ticket_type_id, @name, @price, @qty, @payment_method_id)
   `);
   const byId = db.prepare('SELECT * FROM orders WHERE id = ?');
   const byCode = db.prepare('SELECT * FROM orders WHERE code = ?');
   const itemsFor = db.prepare(`
-    SELECT i.*, t.color AS color
-    FROM order_items i LEFT JOIN ticket_types t ON t.id = i.ticket_type_id
+    SELECT i.*, t.color AS color, p.name AS payment_name
+    FROM order_items i
+    LEFT JOIN ticket_types t ON t.id = i.ticket_type_id
+    LEFT JOIN payment_methods p ON p.id = i.payment_method_id
     WHERE i.order_id IN (SELECT value FROM json_each(?)) ORDER BY i.id
   `);
   const servingRows = db.prepare("SELECT * FROM orders WHERE status = 'serving' ORDER BY called_at, id");
@@ -71,6 +68,7 @@ export function createOrders(db, { ttlHours = 12 } = {}) {
     SELECT * FROM orders WHERE day = ? AND status IN ('done', 'cancelled')
     ORDER BY COALESCE(done_at, created_at) DESC, id DESC LIMIT 30
   `);
+  const dayRows = db.prepare('SELECT * FROM orders WHERE day = ? ORDER BY id DESC LIMIT 100');
   const dayStats = db.prepare(`
     SELECT
       COUNT(*) AS orders,
@@ -121,23 +119,13 @@ export function createOrders(db, { ttlHours = 12 } = {}) {
   }
 
   function parseItems(items) {
-    if (!Array.isArray(items) || items.length === 0 || items.length > 100) throw badRequest('empty_order');
-    const merged = new Map();
-    for (const item of items) {
-      const id = Number(item?.ticketTypeId);
-      const qty = Number(item?.qty);
-      if (!Number.isInteger(id) || id <= 0) throw badRequest('invalid_ticket_type');
-      if (!Number.isInteger(qty) || qty < 0 || qty > MAX_QTY) throw badRequest('invalid_qty');
-      if (qty > 0) merged.set(id, (merged.get(id) ?? 0) + qty);
-    }
-    if (merged.size === 0) throw badRequest('empty_order');
-    const lines = [...merged].map(([id, qty]) => {
-      const type = activeType.get(id);
-      if (!type) throw badRequest('invalid_ticket_type', { ticketTypeId: id });
-      return { ticket_type_id: id, name: type.name, price: type.price, qty };
+    const lines = normalizeItems(items, { defaultPayment: payments.defaultId() }).map((line) => {
+      const type = activeType.get(line.typeId);
+      if (!type) throw badRequest('invalid_ticket_type', { ticketTypeId: line.typeId });
+      if (line.paymentMethodId !== null && !payments.exists(line.paymentMethodId)) throw badRequest('invalid_payment_method');
+      return { ticket_type_id: type.id, name: type.name, price: type.price, qty: line.qty, payment_method_id: line.paymentMethodId };
     });
     const people = lines.reduce((s, l) => s + l.qty, 0);
-    if (people > MAX_QTY) throw badRequest('invalid_qty');
     return { lines, people, total: lines.reduce((s, l) => s + l.qty * l.price, 0) };
   }
 
@@ -199,15 +187,18 @@ export function createOrders(db, { ttlHours = 12 } = {}) {
       };
     },
 
+    /** Кассаға: бір күннің тапсырыстары (ең жаңасы бірінші) — QR-ды қайта көрсету үшін. */
+    dayOrders: (day) => hydrate(dayRows.all(day)),
+
     /** Клиентке: тек өз талоны және кезектегі орны (басқалардың деректері берілмейді). */
     publicView(code) {
       const row = typeof code === 'string' ? byCode.get(code.toLowerCase()) : null;
       if (!row) throw notFound('order_not_found');
       const order = hydrateOne(row);
       const before = row.status === 'waiting' ? ahead.get(row.id) : { n: 0, people: 0 };
-      const { id: _id, ...publicOrder } = order;
+      const { id: _id, items, ...publicOrder } = order;
       return {
-        order: publicOrder,
+        order: { ...publicOrder, items: publicItems(items) },
         queue: {
           ahead: before.n,
           aheadPeople: before.people,

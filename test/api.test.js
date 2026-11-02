@@ -167,7 +167,7 @@ describe('топтық тапсырыс және кезек', () => {
     assert.equal(res.data.queue.ahead, 2);
     assert.equal(res.data.queue.aheadPeople, 6);
     assert.deepEqual(res.data.queue.serving, []);
-    assert.equal(res.data.business.businessName, 'Astral');
+    assert.equal(res.data.business.businessName, 'Astral Labyrinth');
   });
 
   test('белгісіз код → 404', async () => {
@@ -401,5 +401,212 @@ describe('әкімші сілтемесі (аккаунтсыз кіру)', () =
     assert.equal((await call('/api/admin/types')).status, 200);
     const fresh = await call('/api/auth/key', { method: 'POST', body: { key: rotated.data.adminKey }, auth: false });
     assert.equal(fresh.status, 200);
+  });
+});
+
+describe('төлем түрлері (Наличка / Каспий / Банк)', () => {
+  let order;
+  let baseline;
+  const byPayment = async () => {
+    const { data } = await call('/api/admin/reports?period=day');
+    return { totals: data.totals, rows: data.byPayment, by: Object.fromEntries(data.byPayment.map((p) => [p.name ?? 'none', p])) };
+  };
+
+  test('алдын ала дайын үш түр, әдепкісі — Каспий', async () => {
+    const res = await call('/api/admin/payment-methods');
+    assert.equal(res.status, 200);
+    assert.deepEqual(
+      res.data.map((m) => [m.name, m.isDefault]),
+      [
+        ['Наличка', false],
+        ['Каспий', true],
+        ['Банк', false],
+      ],
+    );
+    const catalog = await call('/api/kassa/catalog');
+    assert.equal(catalog.status, 200);
+    assert.equal(catalog.data.defaultPaymentMethodId, 2);
+    assert.equal(catalog.data.paymentMethods.length, 3);
+    assert.ok(catalog.data.types.length >= 3);
+  });
+
+  test('әр билет жолының өз төлем түрі, көрсетілмесе — Каспий', async () => {
+    baseline = await byPayment();
+    const res = await call('/api/kassa/orders', {
+      method: 'POST',
+      body: {
+        items: [
+          { ticketTypeId: 1, qty: 2 }, // әдепкі → Каспий
+          { ticketTypeId: 1, qty: 1, paymentMethodId: 1 }, // бір ересек — қолма-қол
+          { ticketTypeId: 2, qty: 1, paymentMethodId: 3 },
+          { ticketTypeId: 1, qty: 1, paymentMethodId: 2 }, // Каспиймен біріктіріледі
+        ],
+      },
+    });
+    assert.equal(res.status, 201);
+    order = res.data;
+    assert.equal(order.people, 5);
+    assert.deepEqual(
+      order.items.map((i) => [i.ticketTypeId, i.qty, i.paymentName]),
+      [
+        [1, 3, 'Каспий'],
+        [1, 1, 'Наличка'],
+        [2, 1, 'Банк'],
+      ],
+    );
+
+    // Клиентке төлем мәліметтері көрсетілмейді, бір түр бір жол болып шығады
+    const client = await call(`/api/public/orders/${order.code}`, { auth: false });
+    assert.deepEqual(
+      client.data.order.items.map((i) => [i.ticketTypeId, i.qty, i.paymentName]),
+      [
+        [1, 4, undefined],
+        [2, 1, undefined],
+      ],
+    );
+  });
+
+  test('есепте төлем түрлері бойынша бөлінеді, ескі тапсырыстар — «көрсетілмеген»', async () => {
+    const after = await byPayment();
+    const delta = (name, key) => after.by[name][key] - (baseline.by[name]?.[key] ?? 0);
+    assert.equal(delta('Каспий', 'qty'), 3);
+    assert.equal(delta('Каспий', 'revenue'), 3 * 2000);
+    assert.equal(delta('Наличка', 'revenue'), 2000);
+    assert.equal(delta('Банк', 'revenue'), 1000);
+    assert.equal(after.by.none, undefined);
+
+    // Жаңартуға дейін берілген талон (төлем түрі жоқ) бөлек жолға түседі
+    const { lastInsertRowid } = db
+      .prepare("INSERT INTO orders (code, number, day, hour, people, total, created_at) VALUES ('legacy2345', 900, ?, 10, 1, 700, ?)")
+      .run(localParts().day, new Date().toISOString());
+    db.prepare("INSERT INTO order_items (order_id, ticket_type_id, name, price, qty) VALUES (?, 2, 'Балалар', 700, 1)").run(lastInsertRowid);
+    const withLegacy = await byPayment();
+    assert.equal(withLegacy.by.none.revenue, 700);
+    assert.deepEqual(
+      withLegacy.rows.map((p) => p.name),
+      ['Наличка', 'Каспий', 'Банк', null],
+      'тұрақты рет: белсенді түрлер, соңында көрсетілмеген',
+    );
+    assert.equal(
+      withLegacy.rows.reduce((s, p) => s + p.revenue, 0),
+      withLegacy.totals.revenue,
+    );
+  });
+
+  test('жоқ немесе жойылған төлем түрі қабылданбайды', async () => {
+    for (const paymentMethodId of [999, 'x', -1]) {
+      const res = await call('/api/kassa/orders', { method: 'POST', body: { items: [{ ticketTypeId: 1, qty: 1, paymentMethodId }] } });
+      assert.equal(res.status, 400, String(paymentMethodId));
+      assert.equal(res.data.error, 'invalid_payment_method');
+    }
+  });
+
+  test('қосу, атын өзгерту, әдепкі ету, жою', async () => {
+    assert.equal((await call('/api/admin/payment-methods', { method: 'POST', body: { name: ' ' } })).data.error, 'invalid_name');
+    const created = await call('/api/admin/payment-methods', { method: 'POST', body: { name: '  Halyk   QR ' } });
+    assert.equal(created.status, 201);
+    assert.equal(created.data.name, 'Halyk QR');
+    assert.equal(created.data.isDefault, false);
+
+    const renamed = await call(`/api/admin/payment-methods/${created.data.id}`, { method: 'PATCH', body: { name: 'Halyk', isDefault: true } });
+    assert.equal(renamed.data.name, 'Halyk');
+    assert.equal(renamed.data.isDefault, true);
+    assert.equal((await call('/api/kassa/catalog')).data.defaultPaymentMethodId, created.data.id);
+
+    // Әдепкі түр жойылса — тізімдегі бірінші түр әдепкі болады
+    assert.equal((await call(`/api/admin/payment-methods/${created.data.id}`, { method: 'DELETE' })).status, 204);
+    assert.equal((await call(`/api/admin/payment-methods/${created.data.id}`, { method: 'DELETE' })).status, 404);
+    assert.equal((await call('/api/kassa/catalog')).data.defaultPaymentMethodId, 1);
+    const bad = await call('/api/kassa/orders', { method: 'POST', body: { items: [{ ticketTypeId: 1, qty: 1, paymentMethodId: created.data.id }] } });
+    assert.equal(bad.data.error, 'invalid_payment_method');
+
+    // Каспийді қайта әдепкі етеміз
+    assert.equal((await call('/api/admin/payment-methods/2', { method: 'PATCH', body: { isDefault: true } })).data.isDefault, true);
+  });
+});
+
+describe('касса кабинеті (кассир)', () => {
+  let cashierToken;
+  const asCashier = (path, options = {}) => {
+    const saved = token;
+    token = cashierToken;
+    return call(path, options).finally(() => {
+      token = saved;
+    });
+  };
+
+  test('касса сілтемесі арқылы кіру → кассир рөлі', async () => {
+    const { data: settings } = await call('/api/admin/settings');
+    assert.match(settings.cashierKey, /^[A-Za-z0-9]{24}$/);
+    assert.notEqual(settings.cashierKey, settings.adminKey);
+
+    const res = await call('/api/auth/key', { method: 'POST', body: { key: settings.cashierKey }, auth: false });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.role, 'cashier');
+    cashierToken = res.data.token;
+    assert.deepEqual((await asCashier('/api/kassa/session')).data, { ok: true, role: 'cashier' });
+  });
+
+  test('кассир билет береді және бүгінгі сатылымды көреді', async () => {
+    const catalog = await asCashier('/api/kassa/catalog');
+    assert.equal(catalog.status, 200);
+    const created = await asCashier('/api/kassa/orders', {
+      method: 'POST',
+      body: { items: [{ ticketTypeId: 3, qty: 2, paymentMethodId: 1 }] },
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.data.items[0].paymentName, 'Наличка');
+
+    const summary = await asCashier('/api/kassa/summary');
+    assert.equal(summary.status, 200);
+    assert.equal(summary.data.date, localParts().day);
+    assert.equal(summary.data.orders[0].id, created.data.id, 'ең жаңа талон бірінші');
+    assert.ok(summary.data.orders[0].code);
+    const cash = summary.data.byPayment.find((p) => p.name === 'Наличка');
+    assert.ok(cash.revenue >= 2 * 5000);
+    assert.ok(summary.data.byType.length >= 3);
+    assert.equal(summary.data.series, undefined, 'кассирге тек қорытынды');
+  });
+
+  test('кассир әкімші бөлігіне кіре алмайды (403, сессия сақталады)', async () => {
+    for (const [path, method] of [
+      ['/api/admin/reports', 'GET'],
+      ['/api/admin/settings', 'GET'],
+      ['/api/admin/types', 'POST'],
+      ['/api/admin/queue/next', 'POST'],
+      ['/api/admin/payment-methods', 'GET'],
+      ['/api/admin/cashier-key/rotate', 'POST'],
+    ]) {
+      const res = await asCashier(path, { method, body: method === 'POST' ? {} : undefined });
+      assert.equal(res.status, 403, path);
+      assert.equal(res.data.error, 'forbidden');
+    }
+    assert.equal((await asCashier('/api/kassa/session')).status, 200);
+  });
+
+  test('жаңа касса сілтемесі: ескі кілт пен кассир сессиялары өшеді, әкімші қалады', async () => {
+    const { data: before } = await call('/api/admin/settings');
+    const rotated = await call('/api/admin/cashier-key/rotate', { method: 'POST' });
+    assert.equal(rotated.status, 200);
+    assert.notEqual(rotated.data.cashierKey, before.cashierKey);
+
+    assert.equal((await asCashier('/api/kassa/session')).status, 401);
+    assert.equal((await call('/api/auth/key', { method: 'POST', body: { key: before.cashierKey }, auth: false })).status, 401);
+    assert.equal((await call('/api/kassa/session')).data.role, 'admin', 'әкімші де кассаны қолдана алады');
+    assert.equal((await call('/api/admin/types')).status, 200, 'әкімші сессиясы өзгермейді');
+
+    const fresh = await call('/api/auth/key', { method: 'POST', body: { key: rotated.data.cashierKey }, auth: false });
+    assert.equal(fresh.data.role, 'cashier');
+  });
+
+  test('касса беті мен манифесі', async () => {
+    for (const path of ['/kassa', '/kassa/', '/kassa/sales']) {
+      const res = await fetch(base + path);
+      assert.equal(res.status, 200, path);
+      assert.ok((await res.text()).includes('kassa/main.js'), path);
+    }
+    const manifest = await (await fetch(`${base}/kassa/manifest.webmanifest`)).json();
+    assert.equal(manifest.scope, '/kassa/');
+    assert.equal(manifest.short_name, 'Касса');
   });
 });

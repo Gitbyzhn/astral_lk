@@ -1,13 +1,35 @@
-const TOKEN_KEY = 'astral.token';
+// Әкімші мен касса қосымшалары кіру токенін бөлек сақтайды — бір құрылғыда екеуі де ашық болуы мүмкін.
+const TOKEN_KEYS = { admin: 'astral.token', kassa: 'astral.kassa.token' };
+let tokenKey = TOKEN_KEYS.admin;
 let onUnauthorized = () => {};
 
+function save(key, value) {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* сақтау орны жабық (жеке режим) */
+  }
+}
+
 export const auth = {
+  /** Қай қосымшаның токені: 'admin' (әдепкі) немесе 'kassa'. */
+  use(scope) {
+    tokenKey = TOKEN_KEYS[scope] ?? TOKEN_KEYS.admin;
+  },
   get token() {
-    return localStorage.getItem(TOKEN_KEY);
+    try {
+      return localStorage.getItem(tokenKey);
+    } catch {
+      return null;
+    }
   },
   set token(value) {
-    if (value) localStorage.setItem(TOKEN_KEY, value);
-    else localStorage.removeItem(TOKEN_KEY);
+    save(tokenKey, value);
+  },
+  /** Басқа қосымшаның токенін сақтау (мысалы, әкімші бетінде касса сілтемесі ашылса). */
+  saveFor(scope, value) {
+    save(TOKEN_KEYS[scope], value);
   },
   /** Токен жарамсыз болғанда (401) шақырылатын функция — кіру бетін көрсетеді. */
   onUnauthorized(fn) {
@@ -51,7 +73,7 @@ export async function api(path, { method = 'GET', body, signal } = {}) {
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401 && path.startsWith('/admin')) {
+    if (res.status === 401 && (path.startsWith('/admin') || path.startsWith('/kassa'))) {
       auth.token = null;
       onUnauthorized();
     }

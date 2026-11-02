@@ -386,7 +386,7 @@ export function buildSnapshot({ days, catalog, settings, today, timeZone, now = 
   cancelled.sort((a, b) => a - b);
   const types = {};
   for (const [id, t] of Object.entries(catalog?.types ?? {})) types[id] = [t.name, t.color ?? 0];
-  return { v: 1, day: today, u, open, serving, cancelled, types, business: settings?.businessName || 'Astral', tz: timeZone };
+  return { v: 1, day: today, u, open, serving, cancelled, types, business: settings?.businessName || 'Astral Labyrinth', tz: timeZone };
 }
 
 export const snapshotKey = (s) => JSON.stringify({ ...s, at: undefined });
@@ -451,7 +451,7 @@ export function publicFromSnapshot(code, snap) {
       items,
     },
     queue: { ahead, aheadPeople, serving, waiting: open.length },
-    business: { businessName: snap?.business || 'Astral' },
+    business: { businessName: snap?.business || 'Astral Labyrinth' },
   };
 }
 
@@ -460,6 +460,6 @@ export function boardFromSnapshot(snap) {
     serving: (snap?.serving ?? []).map(([number, calledAt]) => ({ number, people: 0, calledAt })),
     next: (snap?.open ?? []).slice(0, 12).map(([number, people]) => ({ number, people })),
     waiting: snap?.open?.length ?? 0,
-    business: { businessName: snap?.business || 'Astral' },
+    business: { businessName: snap?.business || 'Astral Labyrinth' },
   };
 }

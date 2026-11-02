@@ -1,4 +1,5 @@
-// Әкімші кіруі (Cloudflare нұсқасы): құпиясөз (PBKDF2), әкімші сілтемесі (#key=…), HMAC токен.
+// Кіру (Cloudflare нұсқасы): әкімші — құпиясөз (PBKDF2) немесе әкімші сілтемесі (#key=…),
+// кассир — касса сілтемесі (/kassa#key=…). Токен — HMAC қолтаңбасы бар JSON.
 // Тегін жоспарда бір сұрауға CPU уақыты шектеулі, сондықтан хэш итерациясы сервер нұсқасынан аз —
 // оның орнына қате әрекеттер IP бойынша шектеледі.
 import { HttpError, badRequest } from '../server/errors.js';
@@ -40,22 +41,31 @@ async function hmac(secret, data) {
   return b64url(await crypto.subtle.sign('HMAC', key, enc.encode(data)));
 }
 
-export async function issueToken(settings, sessionDays = 30) {
+const passwordVersion = (settings) => Number(settings.get('password_version') || 1);
+const cashierVersion = (settings) => Number(settings.get('cashier_version') || 1);
+
+/** @param {'admin' | 'cashier'} role */
+export async function issueToken(settings, role = 'admin', sessionDays = 30) {
   const expiresAt = Date.now() + sessionDays * 86_400_000;
-  const body = b64url(enc.encode(JSON.stringify({ exp: expiresAt, pv: Number(settings.get('password_version') || 1) })));
-  return { token: `${body}.${await hmac(settings.get('auth_secret'), body)}`, expiresAt };
+  const payload =
+    role === 'cashier' ? { exp: expiresAt, r: 'cashier', cv: cashierVersion(settings) } : { exp: expiresAt, pv: passwordVersion(settings) };
+  const body = b64url(enc.encode(JSON.stringify(payload)));
+  return { token: `${body}.${await hmac(settings.get('auth_secret'), body)}`, expiresAt, role };
 }
 
-export async function verifyToken(token, settings) {
-  if (typeof token !== 'string') return false;
+/** Токеннің рөлі: 'admin' | 'cashier', жарамсыз болса — null. */
+export async function tokenRole(token, settings) {
+  if (typeof token !== 'string') return null;
   const [body, sig] = token.split('.');
-  if (!body || !sig) return false;
-  if (!constantTimeEqual(await hmac(settings.get('auth_secret'), body), sig)) return false;
+  if (!body || !sig) return null;
+  if (!constantTimeEqual(await hmac(settings.get('auth_secret'), body), sig)) return null;
   try {
     const payload = JSON.parse(new TextDecoder().decode(fromB64url(body)));
-    return payload.exp > Date.now() && payload.pv === Number(settings.get('password_version') || 1);
+    if (!(payload.exp > Date.now())) return null;
+    if (payload.r === 'cashier') return payload.cv === cashierVersion(settings) ? 'cashier' : null;
+    return payload.pv === passwordVersion(settings) ? 'admin' : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -91,36 +101,58 @@ export async function login(ctx, password) {
     throw new HttpError(401, 'wrong_password');
   }
   await resetAttempts(ctx.db, ctx.ip);
-  return { ...(await issueToken(settings)), passwordIsDefault: settings.get('password_is_default') === '1' };
+  return { ...(await issueToken(settings, 'admin')), passwordIsDefault: settings.get('password_is_default') === '1' };
 }
 
+/** Сілтеме арқылы кіру: әкімші кілті → әкімші, касса кілті → кассир. */
 export async function loginWithKey(ctx, key) {
   await checkLimit(ctx.db, ctx.ip);
   const settings = await getSettings(ctx.db);
-  if (typeof key !== 'string' || !key || !constantTimeEqual(key, settings.get('admin_key'))) {
+  let role = null;
+  if (typeof key === 'string' && key) {
+    if (constantTimeEqual(key, settings.get('admin_key'))) role = 'admin';
+    else if (settings.get('cashier_key') && constantTimeEqual(key, settings.get('cashier_key'))) role = 'cashier';
+  }
+  if (!role) {
     await failAttempt(ctx.db, ctx.ip);
     throw new HttpError(401, 'invalid_admin_link');
   }
   await resetAttempts(ctx.db, ctx.ip);
-  return { ...(await issueToken(settings)), passwordIsDefault: settings.get('password_is_default') === '1' };
+  if (role === 'cashier') return issueToken(settings, 'cashier');
+  return { ...(await issueToken(settings, 'admin')), passwordIsDefault: settings.get('password_is_default') === '1' };
 }
 
-/** Әкімші сұрауы: `Authorization: Bearer <token>`. Баптауларды қайтарады. */
-export async function requireAdmin(ctx, request) {
+/**
+ * Токенді тексеру: `Authorization: Bearer <token>`. { settings, role } қайтарады.
+ * @param {'admin' | 'staff'} access  admin — тек әкімші (кассирге 403), staff — әкімші немесе кассир
+ */
+export async function requireRole(ctx, request, access) {
   const header = request.headers.get('Authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   const settings = await getSettings(ctx.db);
-  if (!(await verifyToken(token, settings))) throw new HttpError(401, 'unauthorized');
-  return settings;
+  const role = await tokenRole(token, settings);
+  if (!role) throw new HttpError(401, 'unauthorized');
+  if (access === 'admin' && role !== 'admin') throw new HttpError(403, 'forbidden');
+  return { settings, role };
 }
 
 export async function rotateAdminKey(ctx, settings) {
   const key = generateAdminKey();
-  const version = Number(settings.get('password_version') || 1) + 1;
+  const version = passwordVersion(settings) + 1;
   await ctx.db.batch([setSetting(ctx.db, 'admin_key', key), setSetting(ctx.db, 'password_version', version)]);
   settings.set('admin_key', key);
   settings.set('password_version', String(version));
-  return { adminKey: key, ...(await issueToken(settings)) };
+  return { adminKey: key, ...(await issueToken(settings, 'admin')) };
+}
+
+/** Жаңа касса сілтемесі: ескісі өшеді, кассирлердің барлық құрылғылары шығарылады. */
+export async function rotateCashierKey(ctx, settings) {
+  const key = generateAdminKey();
+  const version = cashierVersion(settings) + 1;
+  await ctx.db.batch([setSetting(ctx.db, 'cashier_key', key), setSetting(ctx.db, 'cashier_version', version)]);
+  settings.set('cashier_key', key);
+  settings.set('cashier_version', String(version));
+  return { cashierKey: key };
 }
 
 export async function changePassword(ctx, settings, current, next) {
@@ -130,12 +162,12 @@ export async function changePassword(ctx, settings, current, next) {
     throw new HttpError(400, 'wrong_password');
   }
   if (typeof next !== 'string' || next.length < MIN_PASSWORD || next.length > MAX_PASSWORD) throw badRequest('weak_password');
-  const version = Number(settings.get('password_version') || 1) + 1;
+  const version = passwordVersion(settings) + 1;
   await ctx.db.batch([
     setSetting(ctx.db, 'admin_password', await hashPassword(next)),
     setSetting(ctx.db, 'password_version', version),
     setSetting(ctx.db, 'password_is_default', 0),
   ]);
   settings.set('password_version', String(version));
-  return { ...(await issueToken(settings)), passwordIsDefault: false };
+  return { ...(await issueToken(settings, 'admin')), passwordIsDefault: false };
 }

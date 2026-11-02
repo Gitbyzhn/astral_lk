@@ -1,7 +1,7 @@
 import { h } from './dom.js';
 import { icon } from './icons.js';
 import { getLang, setLang, t } from './i18n.js';
-import { LOGO_URL } from './logo.js';
+import { LOGO_FULL_URL, LOGO_URL } from './logo.js';
 
 /* ------------------------------ Toast ------------------------------ */
 let toastRoot;
@@ -132,6 +132,16 @@ export function brand(name, sub) {
     { class: 'brand' },
     h('img', { class: 'brand-logo', src: LOGO_URL, alt: '', width: 36, height: 36 }),
     h('div', { class: 'brand-name' }, name, sub && h('span', { class: 'brand-sub' }, sub)),
+  );
+}
+
+/** Үлкен логотип (кіру беттері, клиенттің басты беті): толық бренд суреті және астында қысқа жазу. */
+export function brandHero(name, sub, { size = 168 } = {}) {
+  return h(
+    'div',
+    { class: 'brand-hero' },
+    h('img', { class: 'brand-hero-img', src: LOGO_FULL_URL, alt: name, width: size, height: size, style: { width: `${size}px` } }),
+    sub && h('div', { class: 'brand-hero-sub' }, sub),
   );
 }
 

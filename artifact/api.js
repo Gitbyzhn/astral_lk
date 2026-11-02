@@ -42,10 +42,10 @@ const nowIso = () => new Date().toISOString();
 
 function info() {
   if (isAdmin()) {
-    return { businessName: data.settings.businessName || 'Astral', timeZone: timeZone(), publicUrl: data.settings.publicUrl || null };
+    return { businessName: data.settings.businessName || 'Astral Labyrinth', timeZone: timeZone(), publicUrl: data.settings.publicUrl || null };
   }
   const snap = embeddedSnapshot();
-  return { businessName: snap?.business || 'Astral', timeZone: snap?.tz || 'Asia/Almaty', publicUrl: null };
+  return { businessName: snap?.business || 'Astral Labyrinth', timeZone: snap?.tz || 'Asia/Almaty', publicUrl: null };
 }
 
 /* ------------------------------------ Түрлер ------------------------------------ */
@@ -274,6 +274,20 @@ async function route(method, path, body) {
   if (pathname === '/public/info') return info();
   if (pathname === '/public/board') return board();
   if (parts[0] === 'public' && parts[1] === 'orders' && parts[2]) return publicOrder(decodeURIComponent(parts[2]));
+
+  // Касса беті (/kassa/...): мұнда кассир рөлі мен төлем түрлері жоқ — әкімшінің өзі сатады
+  if (parts[0] === 'kassa') {
+    requireAdmin();
+    const section = parts[1];
+    if (section === 'session' && method === 'GET') return { ok: true, role: 'admin' };
+    if (section === 'catalog' && method === 'GET') return { types: typeList(data.catalog), paymentMethods: [], defaultPaymentMethodId: null };
+    if (section === 'orders' && method === 'POST') return createOrder(body?.items);
+    if (section === 'summary' && method === 'GET') {
+      const day = await report('day', params.get('date') ?? undefined);
+      return { date: day.date, totals: day.totals, byType: day.byType, byPayment: [], orders: [] };
+    }
+    throw notFound();
+  }
 
   if (parts[0] !== 'admin') throw notFound();
   requireAdmin();

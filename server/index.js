@@ -16,10 +16,11 @@ setInterval(sweep, 60_000).unref();
 
 const server = app.listen(config.port, config.host, () => {
   const urls = [`http://localhost:${config.port}`, ...lanAddresses().map((ip) => `http://${ip}:${config.port}`)];
-  console.log('\n  Astral — кезек жүйесі іске қосылды');
+  console.log('\n  Astral Labyrinth — кезек жүйесі іске қосылды');
   for (const url of urls) console.log(`  • Клиент:  ${url}\n    Әкімші:  ${url}/admin`);
   const base = config.publicUrl || urls.at(-1);
-  console.log(`\n  🔑 Әкімші сілтемесі (құпиясөзсіз кіру, тек қызметкерлерге):\n     ${base}/admin#key=${services.auth.adminKey()}`);
+  console.log(`\n  🔑 Әкімші сілтемесі (құпиясөзсіз кіру, тек өзіңізге):\n     ${base}/admin#key=${services.auth.adminKey()}`);
+  console.log(`  🎫 Касса сілтемесі (кассирге: тек билет беру және сатылым):\n     ${base}/kassa#key=${services.auth.cashierKey()}`);
   if (services.auth.isDefault()) {
     console.log('\n  ⚠ Әдепкі құпиясөз: "admin" — кіргеннен кейін «Баптаулар» бетінде өзгертіңіз.');
   }

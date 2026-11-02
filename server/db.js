@@ -56,6 +56,18 @@ const MIGRATIONS = [
   CREATE INDEX idx_items_order ON order_items (order_id);
   CREATE INDEX idx_items_type ON order_items (ticket_type_id);
   `,
+  // 2: төлем түрлері (Наличка, Каспий, Банк; әдепкісі — Каспий) және әр билет жолының төлем түрі.
+  // Бұрынғы тапсырыстарда төлем түрі бос қалады (есепте «Көрсетілмеген»).
+  `
+  CREATE TABLE payment_methods (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    name    TEXT    NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+  );
+  INSERT INTO payment_methods (id, name) VALUES (1, 'Наличка'), (2, 'Каспий'), (3, 'Банк');
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('default_payment_method', '2');
+  ALTER TABLE order_items ADD COLUMN payment_method_id INTEGER;
+  `,
 ];
 
 function migrate(db) {

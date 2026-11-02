@@ -23,11 +23,23 @@ export const ADMIN_NAV = [
 ];
 
 /**
- * Әкімші қосымшасы: қабық (мәзір), беттер, нақты уақыттағы жаңартулар.
+ * Қызметкер қосымшасы: қабық (мәзір), беттер, нақты уақыттағы жаңартулар.
+ * Әкімшіге (role: 'admin') де, кассирге (role: 'cashier', /kassa) де ортақ — тек мәзір мен кіру беті басқа.
  * Маршрутизатор сырттан беріледі (өз сервері — History API, Claude сілтемесі — #hash).
- * @param {{ root: HTMLElement, navigate: (path: string, opts?: object) => void, withAuth?: boolean, extraChrome?: () => Node | null }} options
+ * @param {{
+ *   root: HTMLElement,
+ *   navigate: (path: string, opts?: object) => void,
+ *   withAuth?: boolean,
+ *   extraChrome?: () => Node | null,
+ *   nav?: typeof ADMIN_NAV,
+ *   role?: 'admin' | 'cashier',
+ *   login?: typeof loginView,
+ * }} options
  */
-export function createAdminApp({ root, navigate, withAuth = true, extraChrome = () => null }) {
+export function createAdminApp({ root, navigate, withAuth = true, extraChrome = () => null, nav = ADMIN_NAV, role = 'admin', login = loginView }) {
+  const isCashier = role === 'cashier';
+  const subtitle = () => (isCashier ? t('kassa_panel') : t('admin_panel'));
+  store.role = role;
   let current = null; // { page, path }
   let wanted = null; // маршрутизатор сұраған бет (қабық дайын болмаса да есте сақталады)
   let shell = null;
@@ -37,7 +49,7 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
 
   function buildShell() {
     const links = () =>
-      ADMIN_NAV.map((item) =>
+      nav.map((item) =>
         h(
           'a',
           { href: item.path, 'data-link': true, 'data-path': item.path },
@@ -55,7 +67,7 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
       h(
         'aside',
         { class: 'sidebar' },
-        brand(store.info.businessName, t('admin_panel')),
+        brand(store.info.businessName, subtitle()),
         h('nav', { class: 'nav' }, links()),
         h(
           'div',
@@ -67,12 +79,13 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
       h(
         'div',
         { style: { minWidth: '0' } },
-        h('header', { class: 'topbar' }, brand(store.info.businessName, t('admin_panel')), h('div', { class: 'spacer' }), liveBadge(), h('span', { class: 'topbar-lang' }, langToggle())),
+        h('header', { class: 'topbar' }, brand(store.info.businessName, subtitle()), h('div', { class: 'spacer' }), liveBadge(), h('span', { class: 'topbar-lang' }, langToggle())),
         (() => {
           const extra = extraChrome();
           return extra && h('div', { class: 'shell-notice' }, extra);
         })(),
-        store.passwordIsDefault &&
+        !isCashier &&
+          store.passwordIsDefault &&
           h(
             'div',
             { class: 'shell-notice', 'data-notice': true },
@@ -80,7 +93,7 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
           ),
         view,
       ),
-      h('nav', { class: 'tabbar' }, links()),
+      h('nav', { class: 'tabbar', style: { gridTemplateColumns: `repeat(${nav.length}, 1fr)` } }, links()),
     );
     return { el, view };
   }
@@ -111,7 +124,10 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
     updateChrome();
   }
 
+  const hasBadge = nav.some((item) => item.badge);
+
   async function refreshBadge() {
+    if (!hasBadge) return;
     try {
       const board = await api('/public/board');
       setBadge(board.waiting);
@@ -163,11 +179,11 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
     current?.page?.destroy?.();
     current = null;
     shell = null;
-    document.title = `${t('login_title')} · ${store.info.businessName}`;
-    mount(root, loginView({ onSuccess: startApp, error }));
+    document.title = `${isCashier ? t('kassa_panel') : t('login_title')} · ${store.info.businessName}`;
+    mount(root, login({ onSuccess: startApp, error }));
   }
 
-  /** Әкімші сілтемесі (/admin#key=…): кілтті сессияға айырбастап, мекенжайдан өшіреміз. */
+  /** Сілтеме (/admin#key=… немесе /kassa#key=…): кілтті сессияға айырбастап, мекенжайдан өшіреміз. */
   async function loginFromLink() {
     const key = new URLSearchParams(location.hash.slice(1)).get('key');
     if (!key) return null;
@@ -178,8 +194,14 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
     }
     try {
       const result = await api('/auth/key', { method: 'POST', body: { key } });
+      if (result.role === 'cashier' && !isCashier) {
+        // Әкімші бетінде касса сілтемесі ашылды — касса бетіне өткіземіз
+        auth.saveFor('kassa', result.token);
+        location.replace('/kassa/');
+        return new Promise(() => {});
+      }
       auth.token = result.token;
-      store.passwordIsDefault = result.passwordIsDefault;
+      store.passwordIsDefault = result.passwordIsDefault ?? false;
       return null;
     } catch (err) {
       return err;
@@ -202,7 +224,16 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
     }
   }
 
-  if (withAuth) auth.onUnauthorized(() => showLogin());
+  if (withAuth) {
+    auth.onUnauthorized(() => showLogin());
+    // Кіру беті ашық тұрғанда сілтеме мекенжай жолына қойылса, бет қайта жүктелмейді — сонда да кіреміз
+    window.addEventListener('hashchange', async () => {
+      if (shell || !/[#&]key=/.test(location.hash)) return;
+      const error = await loginFromLink();
+      if (error) showLogin(error);
+      else if (auth.token) startApp();
+    });
+  }
 
   return {
     /** Бастапқы жүктеу: баптаулар, кіру тексерісі, қабық. */
@@ -214,9 +245,13 @@ export function createAdminApp({ root, navigate, withAuth = true, extraChrome = 
       if (linkError) return showLogin(linkError);
       if (withAuth && !auth.token) return showLogin();
       try {
-        const session = await api('/admin/session');
-        store.passwordIsDefault = session.passwordIsDefault;
-        store.lanUrls = session.lanUrls ?? [];
+        if (isCashier) {
+          await api('/kassa/session');
+        } else {
+          const session = await api('/admin/session');
+          store.passwordIsDefault = session.passwordIsDefault;
+          store.lanUrls = session.lanUrls ?? [];
+        }
         startApp();
       } catch (err) {
         // Желі жоқ болса да қабықты көрсетеміз: беттер байланыс қалпына келгенде жаңарады.
